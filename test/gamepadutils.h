@@ -83,6 +83,7 @@ extern void SetGamepadDisplayHighlight(GamepadDisplay *ctx, int element, bool pr
 extern void SetGamepadDisplaySelected(GamepadDisplay *ctx, int element);
 extern void ResetGyroOrientation(GamepadDisplay *ctx);
 extern void ResetGyroDriftCapture(GamepadDisplay *ctx);
+extern bool BHasCachedGyroDriftSolution(GamepadDisplay *ctx);
 extern void RenderGamepadDisplay(GamepadDisplay *ctx, SDL_Gamepad *gamepad);
 extern void DestroyGamepadDisplay(GamepadDisplay *ctx);
 
