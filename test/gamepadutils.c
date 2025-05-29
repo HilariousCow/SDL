@@ -1195,7 +1195,7 @@ void CacheGyroDriftSolution(GamepadDisplay *ctx)
 #define MIN_SAMPLES_FOR_DRIFT_SOLUTION 255
 void SampleGyroDrift(GamepadDisplay *ctx, float* gyroSample, float* accelerometerSample)
 {
-    const float threshold = 0.1f; /* This threshold works well for most devices, but may need to be adjusted for specific hardware. */
+    const float threshold = 0.15f; /* This threshold works well for most devices, but may need to be adjusted for specific hardware. */
     float flAccelerometerDeltaSq = 0.0f;
     int i;
 
@@ -1209,7 +1209,7 @@ void SampleGyroDrift(GamepadDisplay *ctx, float* gyroSample, float* acceleromete
      * Above this threshold we must restart the drift capture.
     */
 
-    for ( i = 0; i < 3; ++i) {
+    for (i = 0; i < 3; ++i) {
         float delta = accelerometerSample[i] - ctx->accel_data[i];
         flAccelerometerDeltaSq += delta * delta;
     }
