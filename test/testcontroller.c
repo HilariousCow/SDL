@@ -73,6 +73,7 @@ static GamepadImage *image = NULL;
 static GamepadDisplay *gamepad_elements = NULL;
 static GamepadTypeDisplay *gamepad_type = NULL;
 static JoystickDisplay *joystick_elements = NULL;
+static GamepadButton *reset_gyro_button = NULL;
 static GamepadButton *setup_mapping_button = NULL;
 static GamepadButton *done_mapping_button = NULL;
 static GamepadButton *cancel_button = NULL;
@@ -265,6 +266,7 @@ static void ClearButtonHighlights(void)
     ClearGamepadImage(image);
     SetGamepadDisplayHighlight(gamepad_elements, SDL_GAMEPAD_ELEMENT_INVALID, false);
     SetGamepadTypeDisplayHighlight(gamepad_type, SDL_GAMEPAD_TYPE_UNSELECTED, false);
+    SetGamepadButtonHighlight(reset_gyro_button, false, false);
     SetGamepadButtonHighlight(setup_mapping_button, false, false);
     SetGamepadButtonHighlight(done_mapping_button, false, false);
     SetGamepadButtonHighlight(cancel_button, false, false);
@@ -276,6 +278,7 @@ static void ClearButtonHighlights(void)
 static void UpdateButtonHighlights(float x, float y, bool button_down)
 {
     ClearButtonHighlights();
+    SetGamepadButtonHighlight(reset_gyro_button, GamepadButtonContains(reset_gyro_button, x, y), button_down);
 
     if (display_mode == CONTROLLER_MODE_TESTING) {
         SetGamepadButtonHighlight(setup_mapping_button, GamepadButtonContains(setup_mapping_button, x, y), button_down);
@@ -622,6 +625,7 @@ static void ClearBinding(void)
 {
     CommitBindingElement(NULL, true);
 }
+
 
 static void SetDisplayMode(ControllerDisplayMode mode)
 {
@@ -1807,7 +1811,9 @@ SDL_AppResult SDLCALL SDL_AppEvent(void *appstate, SDL_Event *event)
         }
 
         if (display_mode == CONTROLLER_MODE_TESTING) {
-            if (GamepadButtonContains(setup_mapping_button, event->button.x, event->button.y)) {
+            if (  GamepadButtonContains(reset_gyro_button, event->button.x, event->button.y)) {
+                ResetGyroOrientation(gamepad_elements);
+            } else if (GamepadButtonContains(setup_mapping_button, event->button.x, event->button.y)) {
                 SetDisplayMode(CONTROLLER_MODE_BINDING);
             }
         } else if (display_mode == CONTROLLER_MODE_BINDING) {
@@ -1992,8 +1998,15 @@ SDL_AppResult SDLCALL SDL_AppIterate(void *appstate)
         }
         RenderJoystickDisplay(joystick_elements, controller->joystick);
 
+        if (BHasCachedGyroDriftSolution( gamepad_elements ) )
+        {
+            RenderGamepadButton(reset_gyro_button);
+        }
+
         if (display_mode == CONTROLLER_MODE_TESTING) {
+            
             RenderGamepadButton(setup_mapping_button);
+            
         } else if (display_mode == CONTROLLER_MODE_BINDING) {
             DrawBindingTips(screen);
             RenderGamepadButton(done_mapping_button);
@@ -2162,6 +2175,13 @@ SDL_AppResult SDLCALL SDL_AppInit(void **appstate, int argc, char *argv[])
     area.h = GAMEPAD_HEIGHT;
     SetJoystickDisplayArea(joystick_elements, &area);
 
+    reset_gyro_button = CreateGamepadButton(screen, "Reset Gyro Orientation");
+    area.w = SDL_max(MINIMUM_BUTTON_WIDTH, GetGamepadButtonLabelWidth(reset_gyro_button) + 2 * BUTTON_PADDING);
+    area.h = GetGamepadButtonLabelHeight(reset_gyro_button) + 2 * BUTTON_PADDING;
+    area.x = BUTTON_MARGIN;
+    area.y = SCREEN_HEIGHT - ( area.h * 2 ) - BUTTON_MARGIN;
+    SetGamepadButtonArea(reset_gyro_button, &area);
+
     setup_mapping_button = CreateGamepadButton(screen, "Setup Mapping");
     area.w = SDL_max(MINIMUM_BUTTON_WIDTH, GetGamepadButtonLabelWidth(setup_mapping_button) + 2 * BUTTON_PADDING);
     area.h = GetGamepadButtonLabelHeight(setup_mapping_button) + 2 * BUTTON_PADDING;
@@ -2229,6 +2249,7 @@ void SDLCALL SDL_AppQuit(void *appstate, SDL_AppResult result)
     DestroyGamepadDisplay(gamepad_elements);
     DestroyGamepadTypeDisplay(gamepad_type);
     DestroyJoystickDisplay(joystick_elements);
+    DestroyGamepadButton(reset_gyro_button);
     DestroyGamepadButton(setup_mapping_button);
     DestroyGamepadButton(done_mapping_button);
     DestroyGamepadButton(cancel_button);

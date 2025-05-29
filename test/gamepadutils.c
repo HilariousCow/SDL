@@ -30,6 +30,8 @@
 #include "gamepad_wired.h"
 #include "gamepad_wireless.h"
 
+#include <limits.h>
+
 
 /* This is indexed by gamepad element */
 static const struct
@@ -724,6 +726,96 @@ static const char *gamepad_axis_names[] = {
 };
 SDL_COMPILE_TIME_ASSERT(gamepad_axis_names, SDL_arraysize(gamepad_axis_names) == SDL_GAMEPAD_AXIS_COUNT);
 
+typedef struct
+{
+    float x;
+    float y;
+    float z;
+    float w;
+} Quaternion;
+
+static Quaternion quat_identity = { 0.0f, 0.0f, 0.0f, 1.0f };
+
+
+Quaternion QuaternionFromEuler(float roll, float pitch, float yaw)
+{
+    Quaternion q;
+    float cy = SDL_cosf(yaw * 0.5f);
+    float sy = SDL_sinf(yaw * 0.5f);
+    float cp = SDL_cosf(pitch * 0.5f);
+    float sp = SDL_sinf(pitch * 0.5f);
+    float cr = SDL_cosf(roll * 0.5f);
+    float sr = SDL_sinf(roll * 0.5f);
+
+    q.w = cr * cp * cy + sr * sp * sy;
+    q.x = sr * cp * cy - cr * sp * sy;
+    q.y = cr * sp * cy + sr * cp * sy;
+    q.z = cr * cp * sy - sr * sp * cy;
+
+    return q;
+}
+
+
+static void EulerFromQuaternion(Quaternion q, float *roll, float *pitch, float *yaw)
+{
+    float sinr_cosp = 2.0f * (q.w * q.x + q.y * q.z);
+    float cosr_cosp = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
+    float roll_rad = SDL_atan2f(sinr_cosp, cosr_cosp);
+
+    float sinp = 2.0f * (q.w * q.y - q.z * q.x);
+    float pitch_rad;
+    if (SDL_fabsf(sinp) >= 1.0f) {
+        pitch_rad = SDL_copysignf(SDL_PI_F / 2.0f, sinp);
+    } else {
+        pitch_rad = SDL_asinf(sinp);
+    }
+
+    float siny_cosp = 2.0f * (q.w * q.z + q.x * q.y);
+    float cosy_cosp = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
+    float yaw_rad = SDL_atan2f(siny_cosp, cosy_cosp);
+
+    if (roll)
+        *roll = roll_rad;
+    if (pitch)
+        *pitch = pitch_rad;
+    if (yaw)
+        *yaw = yaw_rad;
+}
+
+static void EulerDegreesFromQuaternion(Quaternion q, float *pitch, float *yaw, float *roll)
+{
+    float pitch_rad, yaw_rad, roll_rad;
+    EulerFromQuaternion(q, &pitch_rad, &yaw_rad, &roll_rad);
+    if (pitch) {
+        *pitch = pitch_rad * (180.0f / SDL_PI_F);
+    }
+    if (yaw) {
+        *yaw = yaw_rad * (180.0f / SDL_PI_F);
+    }
+    if (roll) {
+        *roll = roll_rad * (180.0f / SDL_PI_F);
+    }
+}
+
+Quaternion MultiplyQuaternion(Quaternion a, Quaternion b)
+{
+    Quaternion q;
+    q.x = a.x * b.w + a.y * b.z - a.z * b.y + a.w * b.x;
+    q.y = -a.x * b.z + a.y * b.w + a.z * b.x + a.w * b.y;
+    q.z = a.x * b.y - a.y * b.x + a.z * b.w + a.w * b.z;
+    q.w = -a.x * b.x - a.y * b.y - a.z * b.z + a.w * b.w;
+    return q;
+}
+
+float Normalize180(float angle)
+{
+    angle = SDL_fmodf(angle + 180.0f, 360.0f);
+    if (angle < 0.0f) {
+        angle += 360.0f;
+    }
+    return angle - 180.0f;
+}
+
 struct GamepadDisplay
 {
     SDL_Renderer *renderer;
@@ -736,6 +828,10 @@ struct GamepadDisplay
 
     float accel_data[3];
     float gyro_data[3];
+    float gyro_drift_accumulator[3];
+    int gyro_drift_count;
+    float gyro_drift_solution[3];
+    Quaternion integrated_rotation;
     Uint64 last_sensor_update;
 
     ControllerDisplayMode display_mode;
@@ -760,6 +856,15 @@ GamepadDisplay *CreateGamepadDisplay(SDL_Renderer *renderer)
 
         ctx->element_highlighted = SDL_GAMEPAD_ELEMENT_INVALID;
         ctx->element_selected = SDL_GAMEPAD_ELEMENT_INVALID;
+
+        ResetGyroOrientation(ctx);
+        ResetGyroDriftCapture(ctx);
+
+        SDL_zeroa(ctx->gyro_drift_solution);
+        SDL_zeroa(ctx->accel_data);
+        SDL_zeroa(ctx->gyro_data);
+
+        ctx->integrated_rotation = quat_identity;
     }
     return ctx;
 }
@@ -1044,6 +1149,101 @@ static void RenderGamepadElementHighlight(GamepadDisplay *ctx, int element, cons
     }
 }
 
+void ResetGyroOrientation(GamepadDisplay *ctx)
+{
+    if (!ctx) {
+        return;
+    }
+
+    ctx->integrated_rotation = quat_identity;
+}
+
+void ResetGyroDriftCapture(GamepadDisplay *ctx)
+{
+    if (!ctx) {
+        return;
+    }
+
+    SDL_zeroa(ctx->gyro_drift_accumulator);
+    ctx->gyro_drift_count = 0;
+}
+
+bool BHasCachedGyroDriftSolution(GamepadDisplay *ctx)
+{
+    return ctx->gyro_drift_solution[0] != 0.0f || ctx->gyro_drift_solution[1] != 0.0f || ctx->gyro_drift_solution[2] != 0.0f;
+}
+
+void CacheGyroDriftSolution(GamepadDisplay *ctx)
+{
+    if (!ctx || ctx->gyro_drift_count == 0) {
+        return;
+    }
+
+    // if this is the first time, also reset the accumulated gyroscope
+    if (!BHasCachedGyroDriftSolution(ctx)) {
+        ResetGyroOrientation(ctx);
+    }
+
+    // Average the gyro drift samples
+    for (int i = 0; i < 3; ++i) {
+        ctx->gyro_drift_solution[i] = ctx->gyro_drift_accumulator[i] / (float)ctx->gyro_drift_count;
+    }
+}
+
+// Typically a couple of seconds
+#define MIN_SAMPLES_FOR_DRIFT_SOLUTION 255
+void SampleGyroDrift(GamepadDisplay *ctx, float* gyroSample, float* accelerometerSample)
+{
+    if (!ctx) {
+        return;
+    }
+
+    // Compare the last accelerometer sample from the new one and see if we are within a certain threshold.
+
+    // Above this threshold we must reset the drift capture.
+
+    const float threshold = 0.1f; // Adjust this threshold as needed
+    float flAccelerometerDeltaSq= 0.0f;
+    for (int i = 0; i < 3; ++i) {
+        float delta = accelerometerSample[i] - ctx->accel_data[i];
+        flAccelerometerDeltaSq += delta * delta;
+    }
+
+ 
+
+    // Accelerometer is moving too wildly so we probably don't trust it.
+    if (flAccelerometerDeltaSq > threshold * threshold) {
+        // Cache off previous gyro drift solution if we have enough samples.
+        if (ctx->gyro_drift_count > MIN_SAMPLES_FOR_DRIFT_SOLUTION) {
+            CacheGyroDriftSolution(ctx);
+        }
+        // Don't let the high accelerometer noise pollute our sampling. Reset it.
+        ResetGyroDriftCapture(ctx);
+        return;
+    }
+
+    for (int i=0; i<3; ++i)
+    {
+        ctx->gyro_drift_accumulator[i] += gyroSample[i];
+    }
+    
+    ctx->gyro_drift_count++;
+
+    if (ctx->gyro_drift_count > MIN_SAMPLES_FOR_DRIFT_SOLUTION) {
+        CacheGyroDriftSolution(ctx);
+        ResetGyroDriftCapture(ctx);
+    }
+}
+
+
+void ApplyCachedDriftCorrection(GamepadDisplay *ctx, float *gyroSample)
+{
+    // Average the gyro drift samples
+    for (int i = 0; i < 3; ++i) {
+        gyroSample[i] -= ctx->gyro_drift_solution[i];
+    }
+}
+
 void RenderGamepadDisplay(GamepadDisplay *ctx, SDL_Gamepad *gamepad)
 {
     float x, y;
@@ -1285,18 +1485,42 @@ void RenderGamepadDisplay(GamepadDisplay *ctx, SDL_Gamepad *gamepad)
 
         has_accel = SDL_GamepadHasSensor(gamepad, SDL_SENSOR_ACCEL);
         has_gyro = SDL_GamepadHasSensor(gamepad, SDL_SENSOR_GYRO);
+
         if (has_accel || has_gyro) {
-            const int SENSOR_UPDATE_INTERVAL_MS = 100;
+            const float gyro_sensor_rate = has_gyro ? SDL_GetGamepadSensorDataRate(gamepad, SDL_SENSOR_GYRO) : 0;
+            const int SENSOR_UPDATE_INTERVAL_MS = gyro_sensor_rate > 0.0f ? (int)( 1000.0f / gyro_sensor_rate ) : 100;
             Uint64 now = SDL_GetTicks();
 
             if (now >= ctx->last_sensor_update + SENSOR_UPDATE_INTERVAL_MS) {
+                float accelData[3];
+                float gyroData[3];
                 if (has_accel) {
-                    SDL_GetGamepadSensorData(gamepad, SDL_SENSOR_ACCEL, ctx->accel_data, SDL_arraysize(ctx->accel_data));
+                    SDL_GetGamepadSensorData(gamepad, SDL_SENSOR_ACCEL, accelData, SDL_arraysize(ctx->accel_data));
                 }
                 if (has_gyro) {
-                    SDL_GetGamepadSensorData(gamepad, SDL_SENSOR_GYRO, ctx->gyro_data, SDL_arraysize(ctx->gyro_data));
+                    SDL_GetGamepadSensorData(gamepad, SDL_SENSOR_GYRO, gyroData, SDL_arraysize(ctx->gyro_data));
+
+                    // Gyro data returns values between -2000 and 2000, representing degrees per second.
+                    float flDeltaTime = ((float)(now - ctx->last_sensor_update)) * 0.001f; // Convert ms to seconds
+                    // Convert speed to displacement
+                    Quaternion qDelta = QuaternionFromEuler(ctx->gyro_data[0] * flDeltaTime, ctx->gyro_data[1] * flDeltaTime, ctx->gyro_data[2] * flDeltaTime);
+                    // Accumulate displacement
+                    ctx->integrated_rotation = MultiplyQuaternion(ctx->integrated_rotation, qDelta);
+
+                    // We can use the accelerometer noise to observe gyro drift.
+                    if ( has_accel ) {
+                        SampleGyroDrift(ctx, gyroData, accelData);
+                        SDL_memcpy(ctx->gyro_data, gyroData, sizeof(ctx->gyro_data));
+                        ApplyCachedDriftCorrection(ctx, ctx->gyro_data);
+                    } else {
+                        ResetGyroDriftCapture(ctx);
+                    }
                 }
-                ctx->last_sensor_update = now;
+
+                // Update the accelerometer data
+                if (has_accel) {
+                    SDL_memcpy(ctx->accel_data, accelData, sizeof(ctx->accel_data));
+                }
             }
 
             if (has_accel) {
@@ -1309,13 +1533,99 @@ void RenderGamepadDisplay(GamepadDisplay *ctx, SDL_Gamepad *gamepad)
             }
 
             if (has_gyro) {
+
+                #define DEGREE_UTF8 "\xC2\xB0"
+
                 SDL_strlcpy(text, "Gyro:", sizeof(text));
                 SDLTest_DrawString(ctx->renderer, x + center - SDL_strlen(text) * FONT_CHARACTER_SIZE, y, text);
                 SDL_snprintf(text, sizeof(text), "(%.2f,%.2f,%.2f)", ctx->gyro_data[0], ctx->gyro_data[1], ctx->gyro_data[2]);
                 SDLTest_DrawString(ctx->renderer, x + center + 2.0f, y, text);
 
-                y += ctx->button_height + 2.0f;
+                bool bHasCachedDriftSolution = BHasCachedGyroDriftSolution(ctx);
+
+                // Show gyro drift capture progress:
+                {
+                    y += ctx->button_height + 2.0f;
+                    SDL_strlcpy(text, "Drift:", sizeof(text));
+                    SDLTest_DrawString(ctx->renderer, x + center - SDL_strlen(text) * FONT_CHARACTER_SIZE, y, text);                 
+
+                    float flFrac = (ctx->gyro_drift_count / (float)MIN_SAMPLES_FOR_DRIFT_SOLUTION);
+                    float flPercent = flFrac * 100.0f;
+                    float flAccelerometerNoiseSq = ctx->accel_data[0] * ctx->accel_data[0] + ctx->accel_data[1] * ctx->accel_data[1] + ctx->accel_data[2] * ctx->accel_data[2];
+                    if (flPercent == 0.0f) {
+                        SDL_snprintf(text, sizeof(text), "Movement Detected!)");
+                    }
+                    else if (bHasCachedDriftSolution)
+                    {
+                        SDL_snprintf(text, sizeof(text), "(%.2f,%.2f,%.2f) (Progress: %3.0f%%)",
+                                     ctx->gyro_drift_solution[0],
+                                     ctx->gyro_drift_solution[1],
+                                     ctx->gyro_drift_solution[2],
+                                     flPercent);
+                    } else {
+                        SDL_snprintf(text, sizeof(text), "(Progress: %3.0f%%)", flPercent );
+                    }
+                    SDLTest_DrawString(ctx->renderer, x + center + 2.0f + FONT_CHARACTER_SIZE * 2, y, text);
+
+                    // Draw colored dot:
+                    if (flPercent == 0.0f) {
+                        // Movement detected - make red when high, green when low.
+                        Uint8 red = (Uint8)SDL_min(flAccelerometerNoiseSq, 255.0f);
+                        Uint8 green = (Uint8)(255.0f - SDL_min(flAccelerometerNoiseSq, 255.0f));
+                        SDL_SetTextureColorMod(ctx->button_texture, red, green, 0);
+                    }
+                    else if (bHasCachedDriftSolution) {
+                        SDL_SetTextureColorMod(ctx->button_texture, 0, 255, 0);
+                    } else {
+                        Uint8 red = (Uint8)((1.0f - flFrac) * 255.0f);
+                        Uint8 green = (Uint8)(flFrac * 255.0f);
+                        SDL_SetTextureColorMod(ctx->button_texture, red, green, 0);
+                    }
+
+                    dst.x = x + center + 2.0f;
+                    dst.y = y + FONT_CHARACTER_SIZE / 2 - ctx->button_height / 2;
+                    dst.w = ctx->button_width;
+                    dst.h = ctx->button_height;
+                    SDL_RenderTexture(ctx->renderer, ctx->button_texture, NULL, &dst);
+                }
+
+                // Display rotation since the start
+                // But only show after we first get some drift calibration or we're going to be off.
+                if (bHasCachedDriftSolution)
+                {
+                    y += ctx->button_height + 2.0f;
+                    float flPitchSinceStartDeg, flYawSinceStartDeg, flRollSinceStartDeg;
+                    EulerDegreesFromQuaternion(ctx->integrated_rotation, &flPitchSinceStartDeg, &flYawSinceStartDeg, &flRollSinceStartDeg );
+                    // Clamp the values to -180 to 180 degrees
+                    flPitchSinceStartDeg = Normalize180(flPitchSinceStartDeg);
+                    flYawSinceStartDeg = Normalize180(flYawSinceStartDeg);
+                    flRollSinceStartDeg = Normalize180(flRollSinceStartDeg);
+
+                    SDL_strlcpy(text, "Orientation:", sizeof(text));
+                    SDLTest_DrawString(ctx->renderer, x + center - SDL_strlen(text) * FONT_CHARACTER_SIZE, y, text);
+
+                    // Display a "degree" symbol in UTF-8
+                    
+                    SDL_snprintf(text, sizeof(text), "(p: %6.2f%s, y: %6.2f%s, r: %6.2f%s)",
+                                 flPitchSinceStartDeg, DEGREE_UTF8,
+                                 flYawSinceStartDeg, DEGREE_UTF8,
+                                 flRollSinceStartDeg, DEGREE_UTF8);
+
+                    SDLTest_DrawString(ctx->renderer, x + center + 2.0f, y, text);
+                }
+                // Display rate of gyro
+                {
+                    y += ctx->button_height + 2.0f;
+                    float flDeltaTime = ((float)(now - ctx->last_sensor_update)) * 0.001f; // Convert ms to seconds
+                    SDL_strlcpy(text, "Gyro Delta Time:", sizeof(text));
+                    SDLTest_DrawString(ctx->renderer, x + center - SDL_strlen(text) * FONT_CHARACTER_SIZE, y, text);
+                    SDL_snprintf(text, sizeof(text), "%.5f(s) %f(hz)", flDeltaTime, SDL_GetGamepadSensorDataRate(gamepad, SDL_SENSOR_GYRO));
+                    SDLTest_DrawString(ctx->renderer, x + center + 2.0f, y, text);
+                }
+
             }
+
+            ctx->last_sensor_update = now;
         }
     }
     SDL_free(mapping);

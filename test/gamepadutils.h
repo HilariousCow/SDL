@@ -81,6 +81,8 @@ extern void SetGamepadDisplayArea(GamepadDisplay *ctx, const SDL_FRect *area);
 extern int GetGamepadDisplayElementAt(GamepadDisplay *ctx, SDL_Gamepad *gamepad, float x, float y);
 extern void SetGamepadDisplayHighlight(GamepadDisplay *ctx, int element, bool pressed);
 extern void SetGamepadDisplaySelected(GamepadDisplay *ctx, int element);
+extern void ResetGyroOrientation(GamepadDisplay *ctx);
+extern void ResetGyroDriftCapture(GamepadDisplay *ctx);
 extern void RenderGamepadDisplay(GamepadDisplay *ctx, SDL_Gamepad *gamepad);
 extern void DestroyGamepadDisplay(GamepadDisplay *ctx);
 
