@@ -1175,6 +1175,7 @@ bool BHasCachedGyroDriftSolution(GamepadDisplay *ctx)
 
 void CacheGyroDriftSolution(GamepadDisplay *ctx)
 {
+    int i; 
     if (!ctx || ctx->gyro_drift_count == 0) {
         return;
     }
@@ -1185,7 +1186,7 @@ void CacheGyroDriftSolution(GamepadDisplay *ctx)
     }
 
     /* Average the gyro drift samples */
-    for (int i = 0; i < 3; ++i) {
+    for (i = 0; i < 3; ++i) {
         ctx->gyro_drift_solution[i] = ctx->gyro_drift_accumulator[i] / (float)ctx->gyro_drift_count;
     }
 }
