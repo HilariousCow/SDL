@@ -49,6 +49,118 @@ typedef struct
     int m_nFarthestValue;
 } AxisState;
 
+
+typedef struct
+{
+    float x;
+    float y;
+    float z;
+    float w;
+} Quaternion;
+
+static Quaternion quat_identity = { 0.0f, 0.0f, 0.0f, 1.0f };
+
+Quaternion QuaternionFromEuler(float roll, float pitch, float yaw)
+{
+    Quaternion q;
+    float cy = SDL_cosf(yaw * 0.5f);
+    float sy = SDL_sinf(yaw * 0.5f);
+    float cp = SDL_cosf(pitch * 0.5f);
+    float sp = SDL_sinf(pitch * 0.5f);
+    float cr = SDL_cosf(roll * 0.5f);
+    float sr = SDL_sinf(roll * 0.5f);
+
+    q.w = cr * cp * cy + sr * sp * sy;
+    q.x = sr * cp * cy - cr * sp * sy;
+    q.y = cr * sp * cy + sr * cp * sy;
+    q.z = cr * cp * sy - sr * sp * cy;
+
+    return q;
+}
+
+static void EulerFromQuaternion(Quaternion q, float *roll, float *pitch, float *yaw)
+{
+    float sinr_cosp = 2.0f * (q.w * q.x + q.y * q.z);
+    float cosr_cosp = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
+    float roll_rad = SDL_atan2f(sinr_cosp, cosr_cosp);
+
+    float sinp = 2.0f * (q.w * q.y - q.z * q.x);
+    float pitch_rad;
+    if (SDL_fabsf(sinp) >= 1.0f) {
+        pitch_rad = SDL_copysignf(SDL_PI_F / 2.0f, sinp);
+    } else {
+        pitch_rad = SDL_asinf(sinp);
+    }
+
+    float siny_cosp = 2.0f * (q.w * q.z + q.x * q.y);
+    float cosy_cosp = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
+    float yaw_rad = SDL_atan2f(siny_cosp, cosy_cosp);
+
+    if (roll)
+        *roll = roll_rad;
+    if (pitch)
+        *pitch = pitch_rad;
+    if (yaw)
+        *yaw = yaw_rad;
+}
+
+static void EulerDegreesFromQuaternion(Quaternion q, float *pitch, float *yaw, float *roll)
+{
+    float pitch_rad, yaw_rad, roll_rad;
+    EulerFromQuaternion(q, &pitch_rad, &yaw_rad, &roll_rad);
+    if (pitch) {
+        *pitch = pitch_rad * (180.0f / SDL_PI_F);
+    }
+    if (yaw) {
+        *yaw = yaw_rad * (180.0f / SDL_PI_F);
+    }
+    if (roll) {
+        *roll = roll_rad * (180.0f / SDL_PI_F);
+    }
+}
+
+Quaternion MultiplyQuaternion(Quaternion a, Quaternion b)
+{
+    Quaternion q;
+    q.x = a.x * b.w + a.y * b.z - a.z * b.y + a.w * b.x;
+    q.y = -a.x * b.z + a.y * b.w + a.z * b.x + a.w * b.y;
+    q.z = a.x * b.y - a.y * b.x + a.z * b.w + a.w * b.z;
+    q.w = -a.x * b.x - a.y * b.y - a.z * b.z + a.w * b.w;
+    return q;
+}
+
+float Normalize180(float angle)
+{
+    angle = SDL_fmodf(angle + 180.0f, 360.0f);
+    if (angle < 0.0f) {
+        angle += 360.0f;
+    }
+    return angle - 180.0f;
+}
+
+typedef struct
+{
+    Uint64 gyro_packet_number;
+    Uint64 accelerometer_packet_number;
+
+    /*
+     Don't use this as we are trying to get the number of packets per second.
+    Uint64 last_gyro_timestamp;
+    Uint64 last_accelerometer_timestamp;
+    */
+
+    Uint64 starting_time_stamp; /* Use this to help estimate how many packets are received over a durating */
+
+    Quaternion integrated_rotation;
+
+    float last_accel_data[3];
+    float last_gyro_data[3];
+    float gyro_drift_accumulator[3];
+    int gyro_drift_count;
+    float gyro_drift_solution[3];
+
+} IMUState;
+
 typedef struct
 {
     SDL_JoystickID id;
@@ -56,6 +168,7 @@ typedef struct
     SDL_Joystick *joystick;
     int num_axes;
     AxisState *axis_state;
+    IMUState *imu_state;
 
     SDL_Gamepad *gamepad;
     char *mapping;
@@ -919,6 +1032,9 @@ static void AddController(SDL_JoystickID id, bool verbose)
     if (new_controller->joystick) {
         new_controller->num_axes = SDL_GetNumJoystickAxes(new_controller->joystick);
         new_controller->axis_state = (AxisState *)SDL_calloc(new_controller->num_axes, sizeof(*new_controller->axis_state));
+
+        new_controller->imu_state = (IMUState *)SDL_calloc(1, sizeof(*new_controller->imu_state));
+        new_controller->imu_state->integrated_rotation = quat_identity;
     }
 
     joystick = new_controller->joystick;
@@ -963,6 +1079,10 @@ static void DelController(SDL_JoystickID id)
     if (controllers[i].axis_state) {
         SDL_free(controllers[i].axis_state);
     }
+    if (controllers[i].imu_state) {
+        SDL_free(controllers[i].imu_state);
+    }
+
     if (controllers[i].joystick) {
         SDL_CloseJoystick(controllers[i].joystick);
     }
@@ -1135,6 +1255,50 @@ static void HandleGamepadRemoved(SDL_JoystickID id)
     if (controllers[i].gamepad) {
         SDL_CloseGamepad(controllers[i].gamepad);
         controllers[i].gamepad = NULL;
+    }
+}
+static void HandleGamepadAccelerometerEvent(SDL_Event *event)
+{
+    controller->imu_state->accelerometer_packet_number ++;
+}
+
+static void HandleGamepadGyroEvent(SDL_Event *event)
+{
+    controller->imu_state->gyro_packet_number++;
+}
+
+static void HandleGamepadOrientationEvent(SDL_Event *event)
+{
+
+}
+
+
+static void HandleGamepadSensorEvent( SDL_Event* event )
+{
+    if ( !controller ) {
+        return;
+    }
+
+    // update state of gyro here:
+
+    // Assumption: we get gyro then accel (looping), but we probably want to count each packet and then do any further update when the gyro packet number matches the accel packet number.
+    // Bonus: having the packet number will allow us to get a really accurate idea of the polling rate of the sensor.
+    // which can be used to simulate time stamps a lot better.
+
+    // What type is it? handle each, and then see if we do a combo update
+    // GetSensorName((SDL_SensorType)event->gsensor.sensor),
+
+    // TODO this is only working in singleton IMU case, i.e. not joycons.
+    if (event->gsensor.sensor == SDL_SensorType::SDL_SENSOR_ACCEL) {
+        HandleGamepadAccelerometerEvent(event);
+        
+    } else if (event->gsensor.sensor == SDL_SensorType::SDL_SENSOR_GYRO) {
+        HandleGamepadGyroEvent(event);
+    }
+
+    // This is where we can update the quaternion because we need to have a drift solution, which required both accelerometer and gyro events are received before progressing.
+    if ( controller->imu_state->accelerometer_packet_number == controller->imu_state->gyro_packet_number ) {
+        HandleGamepadOrientationEvent(event);
     }
 }
 
@@ -1742,8 +1906,10 @@ SDL_AppResult SDLCALL SDL_AppEvent(void *appstate, SDL_Event *event)
         break;
 #endif /* VERBOSE_TOUCHPAD */
 
-#ifdef VERBOSE_SENSORS
+
     case SDL_EVENT_GAMEPAD_SENSOR_UPDATE:
+#define VERBOSE_SENSORS
+#ifdef VERBOSE_SENSORS
         SDL_Log("Gamepad %" SDL_PRIu32 " sensor %s: %.2f, %.2f, %.2f (%" SDL_PRIu64 ")",
                 event->gsensor.which,
                 GetSensorName((SDL_SensorType) event->gsensor.sensor),
@@ -1751,8 +1917,10 @@ SDL_AppResult SDLCALL SDL_AppEvent(void *appstate, SDL_Event *event)
                 event->gsensor.data[1],
                 event->gsensor.data[2],
                 event->gsensor.sensor_timestamp);
-        break;
+        
 #endif /* VERBOSE_SENSORS */
+        HandleGamepadSensorEvent(event);
+        break;
 
 #ifdef VERBOSE_AXES
     case SDL_EVENT_GAMEPAD_AXIS_MOTION:

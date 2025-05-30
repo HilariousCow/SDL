@@ -726,96 +726,6 @@ static const char *gamepad_axis_names[] = {
 };
 SDL_COMPILE_TIME_ASSERT(gamepad_axis_names, SDL_arraysize(gamepad_axis_names) == SDL_GAMEPAD_AXIS_COUNT);
 
-typedef struct
-{
-    float x;
-    float y;
-    float z;
-    float w;
-} Quaternion;
-
-static Quaternion quat_identity = { 0.0f, 0.0f, 0.0f, 1.0f };
-
-
-Quaternion QuaternionFromEuler(float roll, float pitch, float yaw)
-{
-    Quaternion q;
-    float cy = SDL_cosf(yaw * 0.5f);
-    float sy = SDL_sinf(yaw * 0.5f);
-    float cp = SDL_cosf(pitch * 0.5f);
-    float sp = SDL_sinf(pitch * 0.5f);
-    float cr = SDL_cosf(roll * 0.5f);
-    float sr = SDL_sinf(roll * 0.5f);
-
-    q.w = cr * cp * cy + sr * sp * sy;
-    q.x = sr * cp * cy - cr * sp * sy;
-    q.y = cr * sp * cy + sr * cp * sy;
-    q.z = cr * cp * sy - sr * sp * cy;
-
-    return q;
-}
-
-
-static void EulerFromQuaternion(Quaternion q, float *roll, float *pitch, float *yaw)
-{
-    float sinr_cosp = 2.0f * (q.w * q.x + q.y * q.z);
-    float cosr_cosp = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
-    float roll_rad = SDL_atan2f(sinr_cosp, cosr_cosp);
-
-    float sinp = 2.0f * (q.w * q.y - q.z * q.x);
-    float pitch_rad;
-    if (SDL_fabsf(sinp) >= 1.0f) {
-        pitch_rad = SDL_copysignf(SDL_PI_F / 2.0f, sinp);
-    } else {
-        pitch_rad = SDL_asinf(sinp);
-    }
-
-    float siny_cosp = 2.0f * (q.w * q.z + q.x * q.y);
-    float cosy_cosp = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
-    float yaw_rad = SDL_atan2f(siny_cosp, cosy_cosp);
-
-    if (roll)
-        *roll = roll_rad;
-    if (pitch)
-        *pitch = pitch_rad;
-    if (yaw)
-        *yaw = yaw_rad;
-}
-
-static void EulerDegreesFromQuaternion(Quaternion q, float *pitch, float *yaw, float *roll)
-{
-    float pitch_rad, yaw_rad, roll_rad;
-    EulerFromQuaternion(q, &pitch_rad, &yaw_rad, &roll_rad);
-    if (pitch) {
-        *pitch = pitch_rad * (180.0f / SDL_PI_F);
-    }
-    if (yaw) {
-        *yaw = yaw_rad * (180.0f / SDL_PI_F);
-    }
-    if (roll) {
-        *roll = roll_rad * (180.0f / SDL_PI_F);
-    }
-}
-
-Quaternion MultiplyQuaternion(Quaternion a, Quaternion b)
-{
-    Quaternion q;
-    q.x = a.x * b.w + a.y * b.z - a.z * b.y + a.w * b.x;
-    q.y = -a.x * b.z + a.y * b.w + a.z * b.x + a.w * b.y;
-    q.z = a.x * b.y - a.y * b.x + a.z * b.w + a.w * b.z;
-    q.w = -a.x * b.x - a.y * b.y - a.z * b.z + a.w * b.w;
-    return q;
-}
-
-float Normalize180(float angle)
-{
-    angle = SDL_fmodf(angle + 180.0f, 360.0f);
-    if (angle < 0.0f) {
-        angle += 360.0f;
-    }
-    return angle - 180.0f;
-}
-
 struct GamepadDisplay
 {
     SDL_Renderer *renderer;
@@ -831,7 +741,8 @@ struct GamepadDisplay
     float gyro_drift_accumulator[3];
     int gyro_drift_count;
     float gyro_drift_solution[3];
-    Quaternion integrated_rotation;
+
+    Quaternion integrated_rotation;// moved to imustate
     Uint64 last_sensor_update;
 
     ControllerDisplayMode display_mode;
@@ -1507,6 +1418,9 @@ void RenderGamepadDisplay(GamepadDisplay *ctx, SDL_Gamepad *gamepad)
                 }
                 if (has_gyro) {
                     SDL_GetGamepadSensorData(gamepad, SDL_SENSOR_GYRO, gyroData, SDL_arraysize(ctx->gyro_data));
+
+                    // This all needs to be moved to the event system.
+
 
                     /* Gyro data returns values between -2000 and 2000, representing degrees per second */
                     float flDeltaTime = ((float)(now - ctx->last_sensor_update)) * 0.001f; /* Convert ms to seconds */
