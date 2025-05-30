@@ -82,7 +82,7 @@ extern int GetGamepadDisplayElementAt(GamepadDisplay *ctx, SDL_Gamepad *gamepad,
 extern void SetGamepadDisplayHighlight(GamepadDisplay *ctx, int element, bool pressed);
 extern void SetGamepadDisplaySelected(GamepadDisplay *ctx, int element);
 extern bool BHasCachedGyroDriftSolution(GamepadDisplay *ctx);
-extern void SetGamepadDisplayIMUValues(GamepadDisplay *ctx, float *gyro_drift_solution, int estimated_sensor_rate, float *euler_displacement_angles, float drift_calibration_progress_frac);
+extern void SetGamepadDisplayIMUValues(GamepadDisplay *ctx, float *gyro_drift_solution, float *euler_displacement_angles, int reported_senor_rate_hz, int estimated_sensor_rate_hz, float drift_calibration_progress_frac);
 extern void RenderGamepadDisplay(GamepadDisplay *ctx, SDL_Gamepad *gamepad);
 extern void DestroyGamepadDisplay(GamepadDisplay *ctx);
 
