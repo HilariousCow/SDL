@@ -153,13 +153,12 @@ typedef struct
 {
     Uint64 gyro_packet_number; // individual event count
     Uint64 accelerometer_packet_number; // individual event count
-    Uint64 imu_packet_number; // pair
+    Uint64 imu_packet_counter; // pair
 
-    Uint64 starting_time_stamp; /* Use this to help estimate how many packets are received over a duration */
+    Uint64 starting_time_stamp_ns; /* Use this to help estimate how many packets are received over a duration */
     Uint16 imu_estimated_sensor_rate; // in Hz, used to estimate how many packets are received over a duration
 
-    Uint64 current_sensor_time_stamp_ns; // Comes from the event data. Official PS5/Edge gives true hardware time stamps. Others are simulated. Nanoseconds  i.e. 1e9
-    Uint64 last_sensor_time_stamp_ns;
+    Uint64 last_sensor_time_stamp_ns;// Comes from the event data/HID implementation. Official PS5/Edge gives true hardware time stamps. Others are simulated. Nanoseconds  i.e. 1e9
 
     int imu_reported_rate; // Comes from the event report.
 
@@ -190,7 +189,7 @@ void ResetIMUState(IMUState *imustate)
 {
     imustate->gyro_packet_number = 0;
     imustate->accelerometer_packet_number = 0;
-    imustate->starting_time_stamp = SDL_GetTicks();
+    imustate->starting_time_stamp_ns = SDL_GetTicksNS();
     imustate->integrated_rotation = quat_identity;
     ResetDriftCalibration(imustate);
     SDL_zeroa(imustate->last_accel_data);
@@ -259,13 +258,12 @@ void ApplyDriftSolution(float *gyro_data, const float *drift_solution)
     gyro_data[2] -= drift_solution[2];
 }
 
-void UpdateGyroRotation(IMUState *imustate )
+void UpdateGyroRotation(IMUState *imustate, Uint64 sensorTimeStampDelta_ns)
 {
-    Uint64 sensorTimeStampDelta_us = imustate->current_sensor_time_stamp_ns - imustate->last_sensor_time_stamp_ns;
     //float flEstimatedTimeStamp = imustate->imu_estimated_sensor_rate > 0 ? 1000.f / imustate->imu_estimated_sensor_rate;
 
     // Convert from nanoseconds to seconds
-    float sensorTimeDeltaTimeSeconds = ((float)sensorTimeStampDelta_us / 1e9f);
+    float sensorTimeDeltaTimeSeconds = SDL_NS_TO_SECONDS((float)sensorTimeStampDelta_ns);
     // Integrate speeds to get Rotational Displacement
     float pitch  = imustate->gyro_data[0] * sensorTimeDeltaTimeSeconds;
     float yaw = imustate->gyro_data[1] * sensorTimeDeltaTimeSeconds;
@@ -1381,52 +1379,43 @@ static void HandleGamepadAccelerometerEvent(SDL_Event *event)
 
 static void HandleGamepadGyroEvent(SDL_Event *event)
 {
-    // Gyro data comes first in the pair so we grab the timestamp from that packet only
-    controller->imu_state->last_sensor_time_stamp_ns = controller->imu_state->current_sensor_time_stamp_ns;
-    controller->imu_state->current_sensor_time_stamp_ns = event->gsensor.timestamp;
-    
     controller->imu_state->gyro_packet_number++;
     SDL_memcpy(controller->imu_state->gyro_data, event->gsensor.data, sizeof(controller->imu_state->gyro_data));
 }
 
-static void HandleGamepadOrientationEvent(SDL_Event *event)
+
+static void EstimatePacketRate(SDL_Event *event)
+{
+    Uint64 now_ns = SDL_GetTicksNS();
+
+    if (controller->imu_state->imu_packet_counter == 0) {
+        controller->imu_state->starting_time_stamp_ns = now_ns;
+    }
+
+    if (controller->imu_state->imu_packet_counter >= SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT) {
+        Uint64 deltatime_ns = now_ns - controller->imu_state->starting_time_stamp_ns;
+        controller->imu_state->imu_estimated_sensor_rate = (Uint16)((controller->imu_state->imu_packet_counter * 1000000000ULL) / deltatime_ns);
+
+        // Reset the sampling.
+        controller->imu_state->starting_time_stamp_ns = now_ns;
+        controller->imu_state->imu_packet_counter = 0;
+    }
+}
+
+static void HandleGamepadOrientationEvent(SDL_Event *event, Uint64 deltatime_ns )
 {
     if (!controller || !controller->imu_state)
         return;
 
-    // this section used to calculate likely polling rate
-    {
-        Uint64 now = SDL_GetTicks();
-        if (controller->imu_state->imu_packet_number == 0) {
-            controller->imu_state->starting_time_stamp = now;
-        }
-
-        ++controller->imu_state->imu_packet_number;
-
-        if (controller->imu_state->imu_packet_number >= SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT) {
-            Uint64 deltatime_ms = now - controller->imu_state->starting_time_stamp; // convert to seconds
-            controller->imu_state->imu_estimated_sensor_rate = (Uint16)((controller->imu_state->imu_packet_number * 1000) / deltatime_ms);
-
-            // Reset the sampling.
-            controller->imu_state->starting_time_stamp = now;
-            controller->imu_state->imu_packet_number = 0;
-        }
-
-    }
-
     SampleGyroPacket(controller->imu_state);
     ApplyDriftSolution(controller->imu_state->gyro_data, controller->imu_state->gyro_drift_solution);
-
-
-    UpdateGyroRotation(controller->imu_state);
-
+    UpdateGyroRotation(controller->imu_state, deltatime_ns);
 }
 
 static void HandleGamepadSensorEvent( SDL_Event* event )
 {
-    if ( !controller ) 
-        return;
-
+    if (!controller)
+        return;   
     // update state of gyro here:
 
     // Assumption: we get gyro then accel (looping), but we probably want to count each packet and then do any further update when the gyro packet number matches the accel packet number.
@@ -1444,15 +1433,21 @@ static void HandleGamepadSensorEvent( SDL_Event* event )
     }  
 
     // This is where we can update the quaternion because we need to have a drift solution, which required both accelerometer and gyro events are received before progressing.
-    if ( controller->imu_state->accelerometer_packet_number == controller->imu_state->gyro_packet_number ) {
-        HandleGamepadOrientationEvent(event);
-
+    if ( controller->imu_state->accelerometer_packet_number == controller->imu_state->gyro_packet_number )
+    {
+        ++controller->imu_state->imu_packet_counter;
+        EstimatePacketRate(event);
+        Uint64 sensorTimeStampDelta_ns =  event->gsensor.sensor_timestamp - controller->imu_state->last_sensor_time_stamp_ns ;
+        HandleGamepadOrientationEvent(event, sensorTimeStampDelta_ns);
         // Send the results to the frontend
         float display_euler_angles[3];
         EulerDegreesFromQuaternion(controller->imu_state->integrated_rotation, &display_euler_angles[0], &display_euler_angles[1], &display_euler_angles[2]);
 
         float drift_calibration_progress_frac = controller->imu_state->gyro_drift_count / (float)SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT;
-        int reported_polling_rate_hz = (int)(1e6 / ( controller->imu_state->current_sensor_time_stamp_ns - controller->imu_state->last_sensor_time_stamp_ns ));
+        
+        // Gyro data comes first in the pair so we grab the timestamp from that packet only
+        
+        int reported_polling_rate_hz = sensorTimeStampDelta_ns > 0 ? (int)(SDL_NS_PER_SECOND / sensorTimeStampDelta_ns) : 0;
 
         SetGamepadDisplayIMUValues(gamepad_elements,
             controller->imu_state->gyro_drift_solution,
@@ -1460,6 +1455,9 @@ static void HandleGamepadSensorEvent( SDL_Event* event )
             reported_polling_rate_hz,
             controller->imu_state->imu_estimated_sensor_rate,
             drift_calibration_progress_frac);
+
+
+        controller->imu_state->last_sensor_time_stamp_ns = event->gsensor.sensor_timestamp;
     }
 }
 
