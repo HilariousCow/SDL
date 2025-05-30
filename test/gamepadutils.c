@@ -1070,7 +1070,7 @@ bool BHasCachedGyroDriftSolution(GamepadDisplay *ctx)
             ctx->gyro_drift_solution[2] != 0.0f);
 }
 
-void SetGamepadDisplayIMUValues(GamepadDisplay *ctx, float *gyro_drift_solution, int estimated_sensor_rate, float *euler_displacement_angles)
+void SetGamepadDisplayIMUValues(GamepadDisplay *ctx, float *gyro_drift_solution, int estimated_sensor_rate, float *euler_displacement_angles, float drift_calibration_progress_frac)
 {
     if (!ctx) {
         return;
@@ -1086,6 +1086,8 @@ void SetGamepadDisplayIMUValues(GamepadDisplay *ctx, float *gyro_drift_solution,
     } else {
         SDL_zeroa(ctx->euler_displacement_angles);
     }
+
+    ctx->drift_calibration_progress_frac = drift_calibration_progress_frac;
 }
 
 void RenderGamepadDisplay(GamepadDisplay *ctx, SDL_Gamepad *gamepad)
