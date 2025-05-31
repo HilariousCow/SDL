@@ -1384,13 +1384,14 @@ static void EstimatePacketRate(SDL_Event *event)
 
     ++controller->imu_state->imu_packet_counter;
 
-    if (controller->imu_state->imu_packet_counter >= SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT) {
+    // Require a significant sample size before averaging rate.
+    if (controller->imu_state->imu_packet_counter >= SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT / 4) {
         Uint64 deltatime_ns = now_ns - controller->imu_state->starting_time_stamp_ns;
         controller->imu_state->imu_estimated_sensor_rate = (Uint16)((controller->imu_state->imu_packet_counter * 1000000000ULL) / deltatime_ns);
 
         // Reset the sampling.
 
-        if (controller->imu_state->imu_packet_counter >= SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT * 8) {
+        if (controller->imu_state->imu_packet_counter >= SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT ) {
             controller->imu_state->starting_time_stamp_ns = now_ns;
             controller->imu_state->imu_packet_counter = 0;
         }
@@ -1411,6 +1412,9 @@ static void HandleGamepadSensorEvent( SDL_Event* event )
 {
     if (!controller)
         return;   
+
+    if (controller->id != event->gsensor.which)
+        return;
 
     if (event->gsensor.sensor == SDL_SENSOR_GYRO) {
         HandleGamepadGyroEvent(event);
@@ -2050,7 +2054,6 @@ SDL_AppResult SDLCALL SDL_AppEvent(void *appstate, SDL_Event *event)
 
 
     case SDL_EVENT_GAMEPAD_SENSOR_UPDATE:
-#define VERBOSE_SENSORS
 #ifdef VERBOSE_SENSORS
         SDL_Log("Gamepad %" SDL_PRIu32 " sensor %s: %.2f, %.2f, %.2f (%" SDL_PRIu64 ")",
                 event->gsensor.which,
