@@ -196,7 +196,7 @@ void ResetGyroOrientation(IMUState *imustate)
     imustate->integrated_rotation = quat_identity;
 }
 
-#define SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT 256
+#define SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT 512
     // calcuated the drift solution based on the accumulated gyro data
 // Per packet drift as opposed to per second drift, as there's less overhead when applying.
 void CalculateDriftSolution(IMUState *imustate)
@@ -1382,10 +1382,8 @@ static void EstimatePacketRate(SDL_Event *event)
         controller->imu_state->starting_time_stamp_ns = now_ns;
     }
 
-    ++controller->imu_state->imu_packet_counter;
-
     // Require a significant sample size before averaging rate.
-    if (controller->imu_state->imu_packet_counter >= SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT / 4) {
+    if (controller->imu_state->imu_packet_counter >= SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT / 2) {
         Uint64 deltatime_ns = now_ns - controller->imu_state->starting_time_stamp_ns;
         controller->imu_state->imu_estimated_sensor_rate = (Uint16)((controller->imu_state->imu_packet_counter * 1000000000ULL) / deltatime_ns);
 
@@ -1396,6 +1394,7 @@ static void EstimatePacketRate(SDL_Event *event)
             controller->imu_state->imu_packet_counter = 0;
         }
     }
+    ++controller->imu_state->imu_packet_counter;
 }
 
 static void UpdateGamepadOrientation( Uint64 delta_time_ns )
