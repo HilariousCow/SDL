@@ -197,10 +197,18 @@ void ResetGyroOrientation(IMUState *imustate)
 }
 
 #define SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT 512
+#define SDL_GAMEPAD_IMU_MIN_POLLING_RATE_ESTIMATION_COUNT 2048
     // calcuated the drift solution based on the accumulated gyro data
 // Per packet drift as opposed to per second drift, as there's less overhead when applying.
 void CalculateDriftSolution(IMUState *imustate)
 {
+    // For convenience, reset the gyro orientation the first time we calculate a drift solution
+    // The accumulated rotation is not displayed until we first get a drift correction as the values would be corrupted due to drift.
+    bool bFirstTimeCalculation = imustate->gyro_drift_solution[0] == 0.0f && imustate->gyro_drift_solution[1] == 0.0f && imustate->gyro_drift_solution[2] == 0.0f;
+    if (bFirstTimeCalculation) {
+        ResetGyroOrientation(imustate);
+    }
+
     if (imustate->gyro_drift_sample_count > SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT) {
         imustate->gyro_drift_solution[0] = imustate->gyro_drift_accumulator[0] / (float)imustate->gyro_drift_sample_count;
         imustate->gyro_drift_solution[1] = imustate->gyro_drift_accumulator[1] / (float)imustate->gyro_drift_sample_count;
@@ -229,6 +237,7 @@ void SampleGyroPacket( IMUState *imustate )
         }
         ResetDriftCalibration(imustate);
     } else {
+        // Sensor is stationary enough to evaluate for drift.
         ++imustate->gyro_drift_sample_count;
 
         imustate->gyro_drift_accumulator[0] += imustate->gyro_data[0];
@@ -1383,16 +1392,15 @@ static void EstimatePacketRate(SDL_Event *event)
     }
 
     // Require a significant sample size before averaging rate.
-    if (controller->imu_state->imu_packet_counter >= SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT / 2) {
+    if (controller->imu_state->imu_packet_counter >= SDL_GAMEPAD_IMU_MIN_POLLING_RATE_ESTIMATION_COUNT) {
         Uint64 deltatime_ns = now_ns - controller->imu_state->starting_time_stamp_ns;
         controller->imu_state->imu_estimated_sensor_rate = (Uint16)((controller->imu_state->imu_packet_counter * 1000000000ULL) / deltatime_ns);
+    }
 
-        // Reset the sampling.
-
-        if (controller->imu_state->imu_packet_counter >= SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT ) {
-            controller->imu_state->starting_time_stamp_ns = now_ns;
-            controller->imu_state->imu_packet_counter = 0;
-        }
+    // Flush sampled data after a brief period so that the imu_estimated_sensor_rate value can be read.
+    if (controller->imu_state->imu_packet_counter >= SDL_GAMEPAD_IMU_MIN_POLLING_RATE_ESTIMATION_COUNT * 2) {
+        controller->imu_state->starting_time_stamp_ns = now_ns;
+        controller->imu_state->imu_packet_counter = 0;
     }
     ++controller->imu_state->imu_packet_counter;
 }
