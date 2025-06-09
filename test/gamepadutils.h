@@ -75,6 +75,8 @@ extern void DestroyGamepadImage(GamepadImage *ctx);
 
 typedef struct GamepadDisplay GamepadDisplay;
 
+typedef struct Quaternion Quaternion;
+
 extern GamepadDisplay *CreateGamepadDisplay(SDL_Renderer *renderer);
 extern void SetGamepadDisplayDisplayMode(GamepadDisplay *ctx, ControllerDisplayMode display_mode);
 extern void SetGamepadDisplayArea(GamepadDisplay *ctx, const SDL_FRect *area);
@@ -82,7 +84,7 @@ extern int GetGamepadDisplayElementAt(GamepadDisplay *ctx, SDL_Gamepad *gamepad,
 extern void SetGamepadDisplayHighlight(GamepadDisplay *ctx, int element, bool pressed);
 extern void SetGamepadDisplaySelected(GamepadDisplay *ctx, int element);
 extern bool BHasCachedGyroDriftSolution(GamepadDisplay *ctx);
-extern void SetGamepadDisplayIMUValues(GamepadDisplay *ctx, float *gyro_drift_solution, float *euler_displacement_angles, int reported_senor_rate_hz, int estimated_sensor_rate_hz, float drift_calibration_progress_frac);
+extern void SetGamepadDisplayIMUValues(GamepadDisplay *ctx, float *gyro_drift_solution, float *euler_displacement_angles, Quaternion *gyro_quaternion, int reported_senor_rate_hz, int estimated_sensor_rate_hz, float drift_calibration_progress_frac);
 extern void RenderGamepadDisplay(GamepadDisplay *ctx, SDL_Gamepad *gamepad);
 extern void DestroyGamepadDisplay(GamepadDisplay *ctx);
 

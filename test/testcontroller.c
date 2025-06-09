@@ -49,14 +49,13 @@ typedef struct
     int m_nFarthestValue;
 } AxisState;
 
-
-typedef struct
+struct Quaternion
 {
     float x;
     float y;
     float z;
     float w;
-} Quaternion;
+};
 
 static Quaternion quat_identity = { 0.0f, 0.0f, 0.0f, 1.0f };
 
@@ -179,7 +178,6 @@ void ResetDriftCalibration(IMUState *imustate)
     imustate->gyro_drift_sample_count = 0;
     SDL_zeroa(imustate->gyro_drift_accumulator);
 }
-
 void ResetIMUState(IMUState *imustate)
 {
     imustate->gyro_packet_number = 0;
@@ -1447,6 +1445,7 @@ static void HandleGamepadSensorEvent( SDL_Event* event )
         SetGamepadDisplayIMUValues(gamepad_elements,
             controller->imu_state->gyro_drift_solution,
             display_euler_angles,
+            &controller->imu_state->integrated_rotation,
             reported_polling_rate_hz,
             controller->imu_state->imu_estimated_sensor_rate,
             drift_calibration_progress_frac);
