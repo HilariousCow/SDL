@@ -32,6 +32,86 @@
 
 #include <limits.h>
 
+/* Used to draw a 3D cube to represent the gyroscope orientation */
+typedef struct
+{
+    float x, y, z;
+} Vec3;
+
+typedef struct
+{
+    float x, y; // screen space 2D projection
+} Vec2;
+
+struct Quaternion
+{
+    float x;
+    float y;
+    float z;
+    float w;
+};
+
+static const Vec3 debug_cube_vertices[] = {
+    { -1.0f, -1.0f, -1.0f },
+    { 1.0f, -1.0f, -1.0f },
+    { 1.0f, 1.0f, -1.0f },
+    { -1.0f, 1.0f, -1.0f },
+    { -1.0f, -1.0f, 1.0f },
+    { 1.0f, -1.0f, 1.0f },
+    { 1.0f, 1.0f, 1.0f },
+    { -1.0f, 1.0f, 1.0f },
+};
+
+static const int debug_cube_edges[][2] = {
+    { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 0 }, // bottom square
+    { 4, 5 }, { 5, 6 }, { 6, 7 }, { 7, 4 }, // top square
+    { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 }, // verticals
+};
+
+static Vec3 RotateVectorByQuaternion(const Vec3 *v, const Quaternion *q)
+{
+    // v' = q * v * q^-1
+    float x = v->x, y = v->y, z = v->z;
+    float qx = q->x, qy = q->y, qz = q->z, qw = q->w;
+
+    // Calculate quaternion * vector
+    float ix = qw * x + qy * z - qz * y;
+    float iy = qw * y + qz * x - qx * z;
+    float iz = qw * z + qx * y - qy * x;
+    float iw = -qx * x - qy * y - qz * z;
+
+    // Result = result * conjugate(q)
+    Vec3 out;
+    out.x = ix * qw + iw * -qx + iy * -qz - iz * -qy;
+    out.y = iy * qw + iw * -qy + iz * -qx - ix * -qz;
+    out.z = iz * qw + iw * -qz + ix * -qy - iy * -qx;
+    return out;
+}
+
+static Vec2 ProjectVec3ToRect(const Vec3 *v, const SDL_FRect *rect)
+{
+    Vec2 out;
+    // Simple orthographic projection using X and Y; scale to fit into rect
+    out.x = rect->x + (rect->w / 2.0f) + (v->x * (rect->w / 2.0f));
+    out.y = rect->y + (rect->h / 2.0f) - (v->y * (rect->h / 2.0f)); // Y inverted
+    return out;
+}
+
+void DrawGyroDebugCube(SDL_Renderer *renderer, const Quaternion *orientation, const SDL_FRect *rect)
+{
+    Vec2 projected[8];
+    for (int i = 0; i < 8; ++i) {
+        Vec3 rotated = RotateVectorByQuaternion(&debug_cube_vertices[i], orientation);
+        projected[i] = ProjectVec3ToRect(&rotated, rect);
+    }
+
+    for (int i = 0; i < 12; ++i) {
+        const Vec2 p0 = projected[debug_cube_edges[i][0]];
+        const Vec2 p1 = projected[debug_cube_edges[i][1]];
+        SDL_RenderLine(renderer, p0.x, p0.y, p1.x, p1.y);
+    }
+}
+
 
 /* This is indexed by gamepad element */
 static const struct
@@ -726,13 +806,6 @@ static const char *gamepad_axis_names[] = {
 };
 SDL_COMPILE_TIME_ASSERT(gamepad_axis_names, SDL_arraysize(gamepad_axis_names) == SDL_GAMEPAD_AXIS_COUNT);
 
-struct Quaternion 
-{
-    float x;
-    float y;
-    float z;
-    float w;
-};
 
 struct GamepadDisplay
 {
@@ -1446,18 +1519,50 @@ void RenderGamepadDisplay(GamepadDisplay *ctx, SDL_Gamepad *gamepad)
                 if (bHasCachedDriftSolution) {
                    
                     if (ctx->gyro_quaternion.x != 0.0f || ctx->gyro_quaternion.y != 0.0f || ctx->gyro_quaternion.z != 0.0f || ctx->gyro_quaternion.w != 0.0f) {
-                        y += ctx->button_height + 2.0f;
+                     
 
-                        SDL_FRect debugBox = {
-                            .x = x,
-                            .y = y,
-                            .w = 200.0f,
-                            .h = 100.0f
+                        int w, h;
+                        if (!SDL_GetRenderOutputSize(ctx->renderer, &w, &h)) {
+                            return;
+                        }
+
+                        // Position just below the controller image
+                        int center_x = w / 2;
+                        int center_y = h / 2;
+                        int width = 100;
+                        int height = 100;
+                        SDL_FRect gyro_preview_rect = {
+                            .x = (float)(center_x - width / 2),
+                            .y = (float)(center_y - height / 2),
+                            .w = (float)width,
+                            .h = (float)height
                         };
 
-                         y += debugBox.h + 2.0f;
                         SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
-                        SDL_RenderRect(ctx->renderer, &debugBox);
+                        SDL_RenderRect(ctx->renderer, &gyro_preview_rect);
+
+                        SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
+                        DrawGyroDebugCube(ctx->renderer, &ctx->gyro_quaternion, &gyro_preview_rect);
+
+                        /*
+                        // generate a list of points defining a unit circle, with 32 points
+#define NUM_CIRCLE_VERTS 32
+                        SDL_FPoint points[NUM_CIRCLE_VERTS];
+                        for ( i = 0; i < NUM_CIRCLE_VERTS; ++i) {
+                            float angle = (float)(i * 2 * SDL_PI_F / NUM_CIRCLE_VERTS);
+                            points[i].x = cosf(angle);
+                            points[i].y = sinf(angle);
+                        }
+
+                        // Draw the circle
+                        SDL_SetRenderDrawColor(ctx->renderer, 0, 0, 0, 0);
+
+                        for (int j = 0; j < NUM_CIRCLE_VERTS; ++j) {
+                            int next_index = (j + 1) % NUM_CIRCLE_VERTS;
+                            
+                            SDL_RenderLines(ctx->renderer, (SDL_FPoint[]){ points[j], points[next_index] }, 2);
+                        }
+                        */
                     }
                     
                 }
