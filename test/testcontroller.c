@@ -2483,7 +2483,6 @@ SDL_AppResult SDLCALL SDL_AppInit(void **appstate, int argc, char *argv[])
     SetGamepadDisplayArea(gamepad_elements, &area);
 
     
-    
     reset_gyro_button = CreateGamepadButton(screen, "Reset Gyro Orientation");// Move relevant stuff inside of gyro elements. that includes redoing buttons or whatever.
     area.w = SDL_max(MINIMUM_BUTTON_WIDTH, GetGamepadButtonLabelWidth(reset_gyro_button) + 2 * BUTTON_PADDING);
     area.h = GetGamepadButtonLabelHeight(reset_gyro_button) + 2 * BUTTON_PADDING;
@@ -2496,7 +2495,7 @@ SDL_AppResult SDLCALL SDL_AppInit(void **appstate, int argc, char *argv[])
     area.w = 600;
     area.h = 600;
     area.x = SCREEN_WIDTH - area.w;
-    area.y = SCREEN_HEIGHT - area.h;
+    area.y = 0;
     //...
     SetGyroDisplayArea(gyro_elements, &area);
     InitCirclePoints3D();
