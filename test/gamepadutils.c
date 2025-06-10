@@ -68,6 +68,7 @@ static const int debug_cube_edges[][2] = {
     { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 }, // verticals
 };
 
+
 static Vec3 RotateVectorByQuaternion(const Vec3 *v, const Quaternion *q)
 {
     // v' = q * v * q^-1
@@ -112,6 +113,83 @@ void DrawGyroDebugCube(SDL_Renderer *renderer, const Quaternion *orientation, co
     }
 }
 
+#define CIRCLE_SEGMENTS 64
+
+static Vec3 kCirclePoints3D_XY_Plane[CIRCLE_SEGMENTS];
+static Vec3 kCirclePoints3D_XZ_Plane[CIRCLE_SEGMENTS];
+static Vec3 kCirclePoints3D_YZ_Plane[CIRCLE_SEGMENTS];
+
+void InitCirclePoints3D(void)
+{
+    for (int i = 0; i < CIRCLE_SEGMENTS; ++i) {
+        float theta = ((float)i / CIRCLE_SEGMENTS) * SDL_PI_F * 2.0f;
+        kCirclePoints3D_XY_Plane[i].x = SDL_cosf(theta);
+        kCirclePoints3D_XY_Plane[i].y = SDL_sinf(theta);
+        kCirclePoints3D_XY_Plane[i].z = 0.0f; // Circle lies in XY plane
+    }
+
+    for (int i = 0; i < CIRCLE_SEGMENTS; ++i) {
+        float theta = ((float)i / CIRCLE_SEGMENTS) * SDL_PI_F * 2.0f;
+        kCirclePoints3D_XZ_Plane[i].x = SDL_cosf(theta);
+        kCirclePoints3D_XZ_Plane[i].y = 0.0f; // Circle lies in XZ plane
+        kCirclePoints3D_XZ_Plane[i].z = SDL_sinf(theta);
+    }
+
+    for (int i = 0; i < CIRCLE_SEGMENTS; ++i) {
+        float theta = ((float)i / CIRCLE_SEGMENTS) * SDL_PI_F * 2.0f;
+        kCirclePoints3D_YZ_Plane[i].x = 0.0f; // Circle lies in YZ plane
+        kCirclePoints3D_YZ_Plane[i].y = SDL_cosf(theta);
+        kCirclePoints3D_YZ_Plane[i].z = SDL_sinf(theta);
+    }
+}
+
+void DrawGyroCircle(
+    SDL_Renderer *renderer,
+    const Vec3 *circlePoints,
+    int numSegments,
+    const Quaternion *orientation,
+    const SDL_FRect *bounds,
+    Uint8 r, Uint8 g, Uint8 b, Uint8 a)
+{
+    SDL_SetRenderDrawColor(renderer, r, g, b, a);
+
+    SDL_FPoint lastScreenPt = { 0 };
+    bool hasLast = false;
+
+    for (int i = 0; i <= numSegments; ++i) {
+        int index = i % numSegments;
+
+        Vec3 rotated = RotateVectorByQuaternion(&circlePoints[index], orientation);
+        Vec2 screenPtVec2 = ProjectVec3ToRect(&rotated, bounds);
+        SDL_FPoint screenPt = { screenPtVec2.x, screenPtVec2.y };
+
+        if (hasLast) {
+            SDL_RenderLine(renderer, lastScreenPt.x, lastScreenPt.y, screenPt.x, screenPt.y);
+        }
+
+        lastScreenPt = screenPt;
+        hasLast = true;
+    }
+}
+
+void DrawGyroDebugCircle(SDL_Renderer *renderer, const Quaternion *orientation, const SDL_FRect *bounds)
+{
+    // Store current color
+    Uint8 r, g, b, a;
+    SDL_GetRenderDrawColor(renderer, &r, &g, &b, &a);
+
+#define COLOR_RED 255, 0, 0, 255
+#define COLOR_GREEN 0, 255, 0, 255
+#define COLOR_BLUE  0, 0, 255, 255
+
+
+    DrawGyroCircle(renderer, kCirclePoints3D_YZ_Plane, CIRCLE_SEGMENTS, orientation, bounds, COLOR_RED);  // X axis - pitch
+    DrawGyroCircle(renderer, kCirclePoints3D_XZ_Plane, CIRCLE_SEGMENTS, orientation, bounds, COLOR_GREEN); // Y axis - yaw
+    DrawGyroCircle(renderer, kCirclePoints3D_XY_Plane, CIRCLE_SEGMENTS, orientation, bounds, COLOR_BLUE); // Z axis - Roll
+
+    // Restore current color
+    SDL_SetRenderDrawColor(renderer, r, g, b, a);
+}
 
 /* This is indexed by gamepad element */
 static const struct
@@ -861,6 +939,8 @@ GamepadDisplay *CreateGamepadDisplay(SDL_Renderer *renderer)
         Quaternion quat_identity = { 0.0f, 0.0f, 0.0f, 1.0f };
         ctx->gyro_quaternion = quat_identity;
     }
+
+    InitCirclePoints3D();
     return ctx;
 }
 
@@ -1543,7 +1623,7 @@ void RenderGamepadDisplay(GamepadDisplay *ctx, SDL_Gamepad *gamepad)
 
                         SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
                         DrawGyroDebugCube(ctx->renderer, &ctx->gyro_quaternion, &gyro_preview_rect);
-
+                        DrawGyroDebugCircle(ctx->renderer, &ctx->gyro_quaternion, &gyro_preview_rect);
                         /*
                         // generate a list of points defining a unit circle, with 32 points
 #define NUM_CIRCLE_VERTS 32
