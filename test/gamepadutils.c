@@ -906,14 +906,6 @@ struct GamepadDisplay
     int element_selected;
 
     SDL_FRect area;
-
-    // This part displays extra info from the IMUstate in order to figure out actual polling rates.
-    float gyro_drift_solution[3];
-    int reported_sensor_rate_hz;           /*hz - comes from HIDsdl implementation. Could be fixed, platform time, or true sensor time*/
-    int estimated_sensor_rate_hz;          /*hz - our estimation of the actual polling rate by observing packets received*/
-    float euler_displacement_angles[3];    // pitch, yaw, roll
-    Quaternion gyro_quaternion;
-    float drift_calibration_progress_frac; // 0..1
 };
 
 GamepadDisplay *CreateGamepadDisplay(SDL_Renderer *renderer)
@@ -932,16 +924,53 @@ GamepadDisplay *CreateGamepadDisplay(SDL_Renderer *renderer)
         ctx->element_selected = SDL_GAMEPAD_ELEMENT_INVALID;
 
         SDL_zeroa(ctx->accel_data);
-        SDL_zeroa(ctx->gyro_data);
+        SDL_zeroa(ctx->gyro_data);        
+    }
+    return ctx;
+}
 
+struct GyroDisplay
+{
+    SDL_Renderer *renderer;
+    // Borrowed from 
+    float button_width;
+    float button_height;
+
+    // Draw area
+    SDL_FRect area;
+
+    // This part displays extra info from the IMUstate in order to figure out actual polling rates.
+    float gyro_drift_solution[3];
+    int reported_sensor_rate_hz;           /*hz - comes from HIDsdl implementation. Could be fixed, platform time, or true sensor time*/
+    int estimated_sensor_rate_hz;          /*hz - our estimation of the actual polling rate by observing packets received*/
+    float euler_displacement_angles[3];    /* pitch, yaw, roll */
+    Quaternion gyro_quaternion;            /* rotation since startup, comprised of each gyro speed packet times sensor delta time. */
+    float drift_calibration_progress_frac; // 0..1
+    float accelerometer_noise;              /* Distance between last noise and new noise. Used to indicate motion. Less*/
+
+};
+
+GyroDisplay *CreateGyroDisplay(SDL_Renderer *renderer)
+{
+    GyroDisplay *ctx = SDL_calloc(1, sizeof(*ctx));
+    {
+        ctx->renderer = renderer;
         ctx->estimated_sensor_rate_hz = 0;
         SDL_zeroa(ctx->gyro_drift_solution);
         Quaternion quat_identity = { 0.0f, 0.0f, 0.0f, 1.0f };
         ctx->gyro_quaternion = quat_identity;
     }
 
-    InitCirclePoints3D();
     return ctx;
+}
+
+void SetGyroDisplayArea(GyroDisplay *ctx, const SDL_FRect *area)
+{
+    if (!ctx) {
+        return;
+    }
+
+    SDL_copyp(&ctx->area, area);
 }
 
 void SetGamepadDisplayDisplayMode(GamepadDisplay *ctx, ControllerDisplayMode display_mode)
@@ -961,6 +990,7 @@ void SetGamepadDisplayArea(GamepadDisplay *ctx, const SDL_FRect *area)
 
     SDL_copyp(&ctx->area, area);
 }
+
 
 static bool GetBindingString(const char *label, const char *mapping, char *text, size_t size)
 {
@@ -1224,7 +1254,7 @@ static void RenderGamepadElementHighlight(GamepadDisplay *ctx, int element, cons
     }
 }
 
-bool BHasCachedGyroDriftSolution(GamepadDisplay *ctx)
+bool BHasCachedGyroDriftSolution(GyroDisplay *ctx)
 {
     if (!ctx) {
         return false;
@@ -1234,7 +1264,7 @@ bool BHasCachedGyroDriftSolution(GamepadDisplay *ctx)
             ctx->gyro_drift_solution[2] != 0.0f);
 }
 
-void SetGamepadDisplayIMUValues(GamepadDisplay *ctx, float *gyro_drift_solution, float *euler_displacement_angles, Quaternion *gyro_quaternion, int reported_senor_rate_hz, int estimated_sensor_rate_hz, float drift_calibration_progress_frac)
+void SetGamepadDisplayIMUValues(GyroDisplay *ctx, float *gyro_drift_solution, float *euler_displacement_angles, Quaternion *gyro_quaternion, int reported_senor_rate_hz, int estimated_sensor_rate_hz, float drift_calibration_progress_frac, float accelerometer_noise)
 {
     if (!ctx) {
         return;
@@ -1249,6 +1279,7 @@ void SetGamepadDisplayIMUValues(GamepadDisplay *ctx, float *gyro_drift_solution,
     SDL_memcpy(ctx->euler_displacement_angles, euler_displacement_angles, sizeof(ctx->euler_displacement_angles));
     ctx->gyro_quaternion = *gyro_quaternion;
     ctx->drift_calibration_progress_frac = drift_calibration_progress_frac;
+    ctx->accelerometer_noise = accelerometer_noise;
 }
 
 void RenderGamepadDisplay(GamepadDisplay *ctx, SDL_Gamepad *gamepad)
@@ -1524,157 +1555,6 @@ void RenderGamepadDisplay(GamepadDisplay *ctx, SDL_Gamepad *gamepad)
                 SDLTest_DrawString(ctx->renderer, x + center - SDL_strlen(text) * FONT_CHARACTER_SIZE, y, text);
                 SDL_snprintf(text, sizeof(text), "(%.2f,%.2f,%.2f)", ctx->gyro_data[0], ctx->gyro_data[1], ctx->gyro_data[2]);
                 SDLTest_DrawString(ctx->renderer, x + center + 2.0f, y, text);
-
-                bool bHasCachedDriftSolution = BHasCachedGyroDriftSolution( ctx );
-                /* Show gyro drift capture progress: */
-                {
-                    y += ctx->button_height + 2.0f;
-                    SDL_strlcpy(text, "Drift:", sizeof(text));
-                    SDLTest_DrawString(ctx->renderer, x + center - SDL_strlen(text) * FONT_CHARACTER_SIZE, y, text);                 
-
-                    float flFrac = ctx->drift_calibration_progress_frac;
-                    float flPercent = flFrac * 100.0f;
-                    float flAccelerometerNoiseSq = ctx->accel_data[0] * ctx->accel_data[0] + ctx->accel_data[1] * ctx->accel_data[1] + ctx->accel_data[2] * ctx->accel_data[2];
-                    if (flPercent == 0.0f) {
-                        SDL_snprintf(text, sizeof(text), "Movement Detected!)");
-                    }
-                    else if (bHasCachedDriftSolution)
-                    {
-                        SDL_snprintf(text, sizeof(text), "(%.2f,%.2f,%.2f) (Progress: %3.0f%%)",
-                                     ctx->gyro_drift_solution[0],
-                                     ctx->gyro_drift_solution[1],
-                                     ctx->gyro_drift_solution[2],
-                                     flPercent);
-                    } else {
-                        SDL_snprintf(text, sizeof(text), "(Progress: %3.0f%%)", flPercent );
-                    }
-                    SDLTest_DrawString(ctx->renderer, x + center + 2.0f + FONT_CHARACTER_SIZE * 2, y, text);
-
-                    /* Draw colored dot:*/
-                    if (flPercent == 0.0f) {
-                        /* Movement detected - make red when high, green when low.*/
-                        Uint8 red = (Uint8)SDL_min(flAccelerometerNoiseSq, 255.0f);
-                        Uint8 green = (Uint8)(255.0f - SDL_min(flAccelerometerNoiseSq, 255.0f));
-                        SDL_SetTextureColorMod(ctx->button_texture, red, green, 0);
-                    }
-                    else if (bHasCachedDriftSolution) {
-                        SDL_SetTextureColorMod(ctx->button_texture, 0, 255, 0);
-                    } else {
-                        Uint8 red = (Uint8)((1.0f - flFrac) * 255.0f);
-                        Uint8 green = (Uint8)(flFrac * 255.0f);
-                        SDL_SetTextureColorMod(ctx->button_texture, red, green, 0);
-                    }
-
-                    dst.x = x + center + 2.0f;
-                    dst.y = y + FONT_CHARACTER_SIZE / 2 - ctx->button_height / 2;
-                    dst.w = ctx->button_width;
-                    dst.h = ctx->button_height;
-                    SDL_RenderTexture(ctx->renderer, ctx->button_texture, NULL, &dst);
-                }
-
-                /* Display rotation since the start
-                * But only show after we first get some drift calibration or we're going to be off.
-                */
-                if (bHasCachedDriftSolution)
-                {
-                    y += ctx->button_height + 2.0f;
-                    float flPitchSinceStartDeg = ctx->euler_displacement_angles[0];
-                    float flYawSinceStartDeg = ctx->euler_displacement_angles[1];
-                    float flRollSinceStartDeg = ctx->euler_displacement_angles[2];
-
-                    SDL_strlcpy(text, "Orientation:", sizeof(text));
-                    SDLTest_DrawString(ctx->renderer, x + center - SDL_strlen(text) * FONT_CHARACTER_SIZE, y, text);
-
-                    /* Display a "degree" symbol in UTF-8 */
-                    
-                    SDL_snprintf(text, sizeof(text), "(p: %6.2f%s, y: %6.2f%s, r: %6.2f%s)",
-                                 flPitchSinceStartDeg, DEGREE_UTF8,
-                                 flYawSinceStartDeg, DEGREE_UTF8,
-                                 flRollSinceStartDeg, DEGREE_UTF8);
-
-                    SDLTest_DrawString(ctx->renderer, x + center + 2.0f, y, text);
-                }
-
-                /* Display a simple 3D rendering of the gyro quaternion */
-                if (bHasCachedDriftSolution) {
-                   
-                    if (ctx->gyro_quaternion.x != 0.0f || ctx->gyro_quaternion.y != 0.0f || ctx->gyro_quaternion.z != 0.0f || ctx->gyro_quaternion.w != 0.0f) {
-                     
-
-                        int w, h;
-                        if (!SDL_GetRenderOutputSize(ctx->renderer, &w, &h)) {
-                            return;
-                        }
-
-                        // Position just below the controller image
-                        int center_x = w / 2;
-                        int center_y = h / 2;
-                        int width = 100;
-                        int height = 100;
-                        SDL_FRect gyro_preview_rect = {
-                            .x = (float)(center_x - width / 2),
-                            .y = (float)(center_y - height / 2),
-                            .w = (float)width,
-                            .h = (float)height
-                        };
-
-                        SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
-                        SDL_RenderRect(ctx->renderer, &gyro_preview_rect);
-
-                        SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
-                        DrawGyroDebugCube(ctx->renderer, &ctx->gyro_quaternion, &gyro_preview_rect);
-                        DrawGyroDebugCircle(ctx->renderer, &ctx->gyro_quaternion, &gyro_preview_rect);
-                        /*
-                        // generate a list of points defining a unit circle, with 32 points
-#define NUM_CIRCLE_VERTS 32
-                        SDL_FPoint points[NUM_CIRCLE_VERTS];
-                        for ( i = 0; i < NUM_CIRCLE_VERTS; ++i) {
-                            float angle = (float)(i * 2 * SDL_PI_F / NUM_CIRCLE_VERTS);
-                            points[i].x = cosf(angle);
-                            points[i].y = sinf(angle);
-                        }
-
-                        // Draw the circle
-                        SDL_SetRenderDrawColor(ctx->renderer, 0, 0, 0, 0);
-
-                        for (int j = 0; j < NUM_CIRCLE_VERTS; ++j) {
-                            int next_index = (j + 1) % NUM_CIRCLE_VERTS;
-                            
-                            SDL_RenderLines(ctx->renderer, (SDL_FPoint[]){ points[j], points[next_index] }, 2);
-                        }
-                        */
-                    }
-                    
-                }
-
-                /* Display rate of gyro as provided by the HID implementation. This could be based on a hardware time stamp (PS5), or it could be generated by the HID implementation. */
-                {
-                    if (ctx->reported_sensor_rate_hz > 0) {
-                        y += ctx->button_height + 2.0f;
-                        /* Convert ms to seconds */
-                        // const float sensor_data_rate_hz = SDL_GetGamepadSensorDataRate(gamepad, SDL_SENSOR_GYRO);
-                        const Uint64 deltatime_us = (Uint64)1e6 / ctx->reported_sensor_rate_hz;
-                        SDL_strlcpy(text, "HID Sensor Time:", sizeof(text));
-                        SDLTest_DrawString(ctx->renderer, x + center - SDL_strlen(text) * FONT_CHARACTER_SIZE, y, text);
-                        SDL_snprintf(text, sizeof(text), "%dus %dhz", deltatime_us, ctx->reported_sensor_rate_hz);
-                        SDLTest_DrawString(ctx->renderer, x + center + 2.0f, y, text);
-                    }
-                }
-
-                /* Display the instrumentation's count of all packets recieved over time. This may represent a more accurate polling rate for the IMU */
-                {
-                    if (ctx->estimated_sensor_rate_hz > 0) {
-                        y += ctx->button_height + 2.0f;
-                        /* Convert ms to seconds */
-                        Uint64 deltatime_us = (Uint64)1e6 / ctx->estimated_sensor_rate_hz;
-                        SDL_strlcpy(text, "Est.Sensor Time:", sizeof(text));
-                        SDLTest_DrawString(ctx->renderer, x + center - SDL_strlen(text) * FONT_CHARACTER_SIZE, y, text);
-                        SDL_snprintf(text, sizeof(text), "%dus %dhz", deltatime_us, ctx->estimated_sensor_rate_hz);
-                        SDLTest_DrawString(ctx->renderer, x + center + 2.0f, y, text);
-                    }
-                }
-
-              
             }
 
             ctx->last_sensor_update = now;
@@ -1693,6 +1573,186 @@ void DestroyGamepadDisplay(GamepadDisplay *ctx)
     SDL_DestroyTexture(ctx->arrow_texture);
     SDL_free(ctx);
 }
+
+
+void RenderGyroDisplay(GyroDisplay *ctx, SDL_Gamepad *gamepad)
+{
+    bool bHasCachedDriftSolution;
+    bool bHasAccelerometer;
+    bool bHasGyroscope;
+    bool bHasIMU;
+
+    float x, y;
+    char text[128];
+    const float center = ctx->area.w / 2.0f;
+    /*
+    SDL_FRect dst, rect, highlight;
+    Uint8 r, g, b, a;*/
+
+    if (!ctx)
+        return;
+
+    bHasAccelerometer = SDL_GamepadHasSensor(gamepad, SDL_SENSOR_ACCEL);
+    bHasGyroscope = SDL_GamepadHasSensor(gamepad, SDL_SENSOR_GYRO);
+    bHasIMU = bHasAccelerometer || bHasGyroscope;
+
+    bHasCachedDriftSolution = BHasCachedGyroDriftSolution(ctx);
+
+
+    x = ctx->area.x;
+    y = ctx->area.y;
+
+    // For now only support _both_ IMU and accelerometer
+    if (!bHasIMU)
+        return;
+
+    /* Show gyro drift capture progress: */
+    if (bHasGyroscope)
+    {
+        y += ctx->button_height + 2.0f;
+        SDL_strlcpy(text, "Drift:", sizeof(text));
+        SDLTest_DrawString(ctx->renderer, x + center - SDL_strlen(text) * FONT_CHARACTER_SIZE, y, text);
+
+        float flFrac = ctx->drift_calibration_progress_frac;
+        float flPercent = flFrac * 100.0f;
+     
+        if (flPercent == 0.0f) {
+            SDL_snprintf(text, sizeof(text), "Movement Detected!)");
+        } else if (bHasCachedDriftSolution) {
+            SDL_snprintf(text, sizeof(text), "(%.2f,%.2f,%.2f) (Progress: %3.0f%%)",
+                         ctx->gyro_drift_solution[0],
+                         ctx->gyro_drift_solution[1],
+                         ctx->gyro_drift_solution[2],
+                         flPercent);
+        } else {
+            SDL_snprintf(text, sizeof(text), "(Progress: %3.0f%%)", flPercent);
+        }
+        SDLTest_DrawString(ctx->renderer, x + center + 2.0f + FONT_CHARACTER_SIZE * 2, y, text);
+
+
+        //   float flAccelerometerNoise = ctx->accelerometer_noise;
+        /* Noise Meter */
+        /* Movement detected - make red when high, green when low.*/
+        /*
+        if (flPercent == 0.0f) {
+          
+            Uint8 red = (Uint8)SDL_min(flAccelerometerNoise, 255.0f);
+            Uint8 green = (Uint8)(255.0f - SDL_min(flAccelerometerNoise, 255.0f));
+            SDL_SetTextureColorMod(ctx->button_texture, red, green, 0);
+        } else if (bHasCachedDriftSolution) {
+            SDL_SetTextureColorMod(ctx->button_texture, 0, 255, 0);
+        } else {
+            Uint8 red = (Uint8)((1.0f - flFrac) * 255.0f);
+            Uint8 green = (Uint8)(flFrac * 255.0f);
+            SDL_SetTextureColorMod(ctx->button_texture, red, green, 0);
+        }
+
+        dst.x = x + center + 2.0f;
+        dst.y = y + FONT_CHARACTER_SIZE / 2 - ctx->button_height / 2;
+        dst.w = ctx->button_width;
+        dst.h = ctx->button_height;
+        SDL_RenderTexture(ctx->renderer, ctx->button_texture, NULL, &dst);// todo: replace with something better, like a noise bar. just draw a rect.
+        */
+    }
+
+    /* Display rotation since the start
+     * But only show after we first get some drift calibration or we're going to be off.
+     */
+    if (bHasCachedDriftSolution) {
+        y += ctx->button_height + 2.0f;
+        float flPitchSinceStartDeg = ctx->euler_displacement_angles[0];
+        float flYawSinceStartDeg = ctx->euler_displacement_angles[1];
+        float flRollSinceStartDeg = ctx->euler_displacement_angles[2];
+
+        SDL_strlcpy(text, "Orientation:", sizeof(text));
+        SDLTest_DrawString(ctx->renderer, x + center - SDL_strlen(text) * FONT_CHARACTER_SIZE, y, text);
+
+        /* Display a "degree" symbol in UTF-8 */
+
+        SDL_snprintf(text, sizeof(text), "(p: %6.2f%s, y: %6.2f%s, r: %6.2f%s)",
+                     flPitchSinceStartDeg, DEGREE_UTF8,
+                     flYawSinceStartDeg, DEGREE_UTF8,
+                     flRollSinceStartDeg, DEGREE_UTF8);
+
+        SDLTest_DrawString(ctx->renderer, x + center + 2.0f, y, text);
+    }
+
+    /* Display a simple 3D rendering of the gyro quaternion */
+    if (bHasCachedDriftSolution) {
+
+        if (ctx->gyro_quaternion.x != 0.0f || ctx->gyro_quaternion.y != 0.0f || ctx->gyro_quaternion.z != 0.0f || ctx->gyro_quaternion.w != 0.0f) {
+
+            int w, h;
+            if (!SDL_GetRenderOutputSize(ctx->renderer, &w, &h)) {
+                return;
+            }
+
+            // Position just below the controller image
+            int center_x = w / 2;
+            int center_y = h / 2;
+            int width = 100;
+            int height = 100;
+            SDL_FRect gyro_preview_rect = {
+                .x = (float)(center_x - width / 2),
+                .y = (float)(center_y - height / 2),
+                .w = (float)width,
+                .h = (float)height
+            };
+
+            SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
+            SDL_RenderRect(ctx->renderer, &gyro_preview_rect);
+
+            SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
+            DrawGyroDebugCube(ctx->renderer, &ctx->gyro_quaternion, &gyro_preview_rect);
+            DrawGyroDebugCircle(ctx->renderer, &ctx->gyro_quaternion, &gyro_preview_rect);
+        }
+    }
+
+    /* Display rate of gyro as provided by the HID implementation. This could be based on a hardware time stamp (PS5), or it could be generated by the HID implementation. */
+    {
+        if (ctx->reported_sensor_rate_hz > 0) {
+            y += ctx->button_height + 2.0f;
+            /* Convert ms to seconds */
+            // const float sensor_data_rate_hz = SDL_GetGamepadSensorDataRate(gamepad, SDL_SENSOR_GYRO);
+            const Uint64 deltatime_us = (Uint64)1e6 / ctx->reported_sensor_rate_hz;
+            SDL_strlcpy(text, "HID Sensor Time:", sizeof(text));
+            SDLTest_DrawString(ctx->renderer, x + center - SDL_strlen(text) * FONT_CHARACTER_SIZE, y, text);
+            SDL_snprintf(text, sizeof(text), "%dus %dhz", deltatime_us, ctx->reported_sensor_rate_hz);
+            SDLTest_DrawString(ctx->renderer, x + center + 2.0f, y, text);
+        }
+    }
+
+    /* Display the instrumentation's count of all packets recieved over time. This may represent a more accurate polling rate for the IMU */
+    {
+        if (ctx->estimated_sensor_rate_hz > 0) {
+            y += ctx->button_height + 2.0f;
+            /* Convert ms to seconds */
+            Uint64 deltatime_us = (Uint64)1e6 / ctx->estimated_sensor_rate_hz;
+            SDL_strlcpy(text, "Est.Sensor Time:", sizeof(text));
+            SDLTest_DrawString(ctx->renderer, x + center - SDL_strlen(text) * FONT_CHARACTER_SIZE, y, text);
+            SDL_snprintf(text, sizeof(text), "%dus %dhz", deltatime_us, ctx->estimated_sensor_rate_hz);
+            SDLTest_DrawString(ctx->renderer, x + center + 2.0f, y, text);
+        }
+    }
+
+    /* Renders a reset button*/
+
+    // TODO: redo the button logic i guess!
+    /*
+    if ( bHasCachedDriftSolution ) {
+        RenderGamepadButton(ctx); // can't use.
+    }*/
+}
+
+void DestroyGyroDisplay(GyroDisplay *ctx)
+{
+    if (!ctx) {
+        return;
+    }
+
+    SDL_free(ctx);
+}
+
 
 struct GamepadTypeDisplay
 {

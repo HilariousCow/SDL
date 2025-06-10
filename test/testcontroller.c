@@ -164,7 +164,7 @@ typedef struct
     float gyro_data[3];
 
     float last_accel_data[3];// Needed to detect motion (and inhibit drift calibration)
-
+    float accelerometer_length_squared;
     float gyro_drift_accumulator[3];
     int gyro_drift_sample_count;
     float gyro_drift_solution[3];
@@ -184,6 +184,7 @@ void ResetIMUState(IMUState *imustate)
     imustate->accelerometer_packet_number = 0;
     imustate->starting_time_stamp_ns = SDL_GetTicksNS();
     imustate->integrated_rotation = quat_identity;
+    imustate->accelerometer_length_squared = 0.0f;
     ResetDriftCalibration(imustate);
     SDL_zeroa(imustate->last_accel_data);
     SDL_zeroa(imustate->gyro_drift_solution);
@@ -215,7 +216,7 @@ void CalculateDriftSolution(IMUState *imustate)
 }
 
 // Sample gyro packet in order to calculate drift
-void SampleGyroPacket( IMUState *imustate )
+void SampleGyroPacketForDrift( IMUState *imustate )
 {
     // get the length squared difference of the last accelerometer data vs. the new one
     float accelerometer_difference[3];
@@ -224,10 +225,10 @@ void SampleGyroPacket( IMUState *imustate )
     accelerometer_difference[2] = imustate->accel_data[2] - imustate->last_accel_data[2];
     SDL_memcpy(imustate->last_accel_data, imustate->accel_data, sizeof(imustate->last_accel_data));
 
-    float accelerometer_length_squared = accelerometer_difference[0] * accelerometer_difference[0] + accelerometer_difference[1] * accelerometer_difference[1] + accelerometer_difference[2] * accelerometer_difference[2];
+    imustate->accelerometer_length_squared = accelerometer_difference[0] * accelerometer_difference[0] + accelerometer_difference[1] * accelerometer_difference[1] + accelerometer_difference[2] * accelerometer_difference[2];
 
     const float flAccelerometerMovementThreshold = 0.15f;
-    if (accelerometer_length_squared > flAccelerometerMovementThreshold * flAccelerometerMovementThreshold) {
+    if (imustate->accelerometer_length_squared > flAccelerometerMovementThreshold * flAccelerometerMovementThreshold) {
         // reset the drift calibration if the accelerometer has moved significantly
         // but first, if we have enough gyro data, calculate the drift solution
         if (imustate->gyro_drift_sample_count > SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT) {
@@ -295,6 +296,7 @@ static SDL_Renderer *screen = NULL;
 static ControllerDisplayMode display_mode = CONTROLLER_MODE_TESTING;
 static GamepadImage *image = NULL;
 static GamepadDisplay *gamepad_elements = NULL;
+static GyroDisplay *gyro_elements = NULL;
 static GamepadTypeDisplay *gamepad_type = NULL;
 static JoystickDisplay *joystick_elements = NULL;
 static GamepadButton *reset_gyro_button = NULL;
@@ -1408,7 +1410,7 @@ static void UpdateGamepadOrientation( Uint64 delta_time_ns )
     if (!controller || !controller->imu_state)
         return;
 
-    SampleGyroPacket(controller->imu_state);
+    SampleGyroPacketForDrift(controller->imu_state);
     ApplyDriftSolution(controller->imu_state->gyro_data, controller->imu_state->gyro_drift_solution);
     UpdateGyroRotation(controller->imu_state, delta_time_ns);
 }
@@ -1441,14 +1443,17 @@ static void HandleGamepadSensorEvent( SDL_Event* event )
         float drift_calibration_progress_frac = controller->imu_state->gyro_drift_sample_count / (float)SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT;
         int reported_polling_rate_hz = sensorTimeStampDelta_ns > 0 ? (int)(SDL_NS_PER_SECOND / sensorTimeStampDelta_ns) : 0;
 
+        float accelerometer_noise = controller->imu_state->accelerometer_length_squared;
         // Send the results to the frontend
-        SetGamepadDisplayIMUValues(gamepad_elements,
+        SetGamepadDisplayIMUValues(gyro_elements,
             controller->imu_state->gyro_drift_solution,
             display_euler_angles,
             &controller->imu_state->integrated_rotation,
             reported_polling_rate_hz,
             controller->imu_state->imu_estimated_sensor_rate,
-            drift_calibration_progress_frac);
+            drift_calibration_progress_frac,
+            accelerometer_noise
+        );
 
         controller->imu_state->last_sensor_time_stamp_ns = event->gsensor.sensor_timestamp;
     }
@@ -2130,7 +2135,7 @@ SDL_AppResult SDLCALL SDL_AppEvent(void *appstate, SDL_Event *event)
         }
 
         if (display_mode == CONTROLLER_MODE_TESTING) {
-            if (  GamepadButtonContains(reset_gyro_button, event->button.x, event->button.y)) {
+            if ( GamepadButtonContains(reset_gyro_button, event->button.x, event->button.y)) {
                 ResetGyroOrientation(controller->imu_state);
             } else if (GamepadButtonContains(setup_mapping_button, event->button.x, event->button.y)) {
                 SetDisplayMode(CONTROLLER_MODE_BINDING);
@@ -2317,10 +2322,7 @@ SDL_AppResult SDLCALL SDL_AppIterate(void *appstate)
         }
         RenderJoystickDisplay(joystick_elements, controller->joystick);
 
-        if (BHasCachedGyroDriftSolution( gamepad_elements ) )
-        {
-            RenderGamepadButton(reset_gyro_button);
-        }
+        RenderGyroDisplay(gyro_elements, controller->gamepad);
 
         if (display_mode == CONTROLLER_MODE_TESTING) {
             
@@ -2480,6 +2482,25 @@ SDL_AppResult SDLCALL SDL_AppInit(void **appstate, int argc, char *argv[])
     area.h = GAMEPAD_HEIGHT;
     SetGamepadDisplayArea(gamepad_elements, &area);
 
+    
+    
+    reset_gyro_button = CreateGamepadButton(screen, "Reset Gyro Orientation");// Move relevant stuff inside of gyro elements. that includes redoing buttons or whatever.
+    area.w = SDL_max(MINIMUM_BUTTON_WIDTH, GetGamepadButtonLabelWidth(reset_gyro_button) + 2 * BUTTON_PADDING);
+    area.h = GetGamepadButtonLabelHeight(reset_gyro_button) + 2 * BUTTON_PADDING;
+    area.x = BUTTON_MARGIN;
+    area.y = SCREEN_HEIGHT - (area.h * 2) - BUTTON_MARGIN;
+
+    SetGamepadButtonArea(reset_gyro_button, &area);
+    gyro_elements = CreateGyroDisplay(screen);
+    // Bottom right corner
+    area.w = 600;
+    area.h = 600;
+    area.x = SCREEN_WIDTH - area.w;
+    area.y = SCREEN_HEIGHT - area.h;
+    //...
+    SetGyroDisplayArea(gyro_elements, &area);
+    InitCirclePoints3D();
+
     gamepad_type = CreateGamepadTypeDisplay(screen);
     area.x = 0;
     area.y = TITLE_HEIGHT;
@@ -2493,13 +2514,6 @@ SDL_AppResult SDLCALL SDL_AppInit(void **appstate, int argc, char *argv[])
     area.w = PANEL_WIDTH;
     area.h = GAMEPAD_HEIGHT;
     SetJoystickDisplayArea(joystick_elements, &area);
-
-    reset_gyro_button = CreateGamepadButton(screen, "Reset Gyro Orientation");
-    area.w = SDL_max(MINIMUM_BUTTON_WIDTH, GetGamepadButtonLabelWidth(reset_gyro_button) + 2 * BUTTON_PADDING);
-    area.h = GetGamepadButtonLabelHeight(reset_gyro_button) + 2 * BUTTON_PADDING;
-    area.x = BUTTON_MARGIN;
-    area.y = SCREEN_HEIGHT - ( area.h * 2 ) - BUTTON_MARGIN;
-    SetGamepadButtonArea(reset_gyro_button, &area);
 
     setup_mapping_button = CreateGamepadButton(screen, "Setup Mapping");
     area.w = SDL_max(MINIMUM_BUTTON_WIDTH, GetGamepadButtonLabelWidth(setup_mapping_button) + 2 * BUTTON_PADDING);
@@ -2566,6 +2580,7 @@ void SDLCALL SDL_AppQuit(void *appstate, SDL_AppResult result)
     SDL_free(controller_name);
     DestroyGamepadImage(image);
     DestroyGamepadDisplay(gamepad_elements);
+    DestroyGyroDisplay(gyro_elements);
     DestroyGamepadTypeDisplay(gamepad_type);
     DestroyJoystickDisplay(joystick_elements);
     DestroyGamepadButton(reset_gyro_button);
