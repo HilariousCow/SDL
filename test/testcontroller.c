@@ -51,10 +51,7 @@ typedef struct
 
 struct Quaternion
 {
-    float x;
-    float y;
-    float z;
-    float w;
+    float x, y, z, w;
 };
 
 static Quaternion quat_identity = { 0.0f, 0.0f, 0.0f, 1.0f };
@@ -300,7 +297,6 @@ static GamepadDisplay *gamepad_elements = NULL;
 static GyroDisplay *gyro_elements = NULL;
 static GamepadTypeDisplay *gamepad_type = NULL;
 static JoystickDisplay *joystick_elements = NULL;
-static GamepadButton *reset_gyro_button = NULL;
 static GamepadButton *setup_mapping_button = NULL;
 static GamepadButton *done_mapping_button = NULL;
 static GamepadButton *cancel_button = NULL;
@@ -493,7 +489,7 @@ static void ClearButtonHighlights(void)
     ClearGamepadImage(image);
     SetGamepadDisplayHighlight(gamepad_elements, SDL_GAMEPAD_ELEMENT_INVALID, false);
     SetGamepadTypeDisplayHighlight(gamepad_type, SDL_GAMEPAD_TYPE_UNSELECTED, false);
-    SetGamepadButtonHighlight(reset_gyro_button, false, false);
+    SetGamepadButtonHighlight( GetGyroResetButton( gyro_elements ), false, false);
     SetGamepadButtonHighlight(setup_mapping_button, false, false);
     SetGamepadButtonHighlight(done_mapping_button, false, false);
     SetGamepadButtonHighlight(cancel_button, false, false);
@@ -505,7 +501,7 @@ static void ClearButtonHighlights(void)
 static void UpdateButtonHighlights(float x, float y, bool button_down)
 {
     ClearButtonHighlights();
-    SetGamepadButtonHighlight(reset_gyro_button, GamepadButtonContains(reset_gyro_button, x, y), button_down);
+    SetGamepadButtonHighlight(GetGyroResetButton(gyro_elements), GamepadButtonContains(GetGyroResetButton(gyro_elements), x, y), button_down);
 
     if (display_mode == CONTROLLER_MODE_TESTING) {
         SetGamepadButtonHighlight(setup_mapping_button, GamepadButtonContains(setup_mapping_button, x, y), button_down);
@@ -2135,7 +2131,7 @@ SDL_AppResult SDLCALL SDL_AppEvent(void *appstate, SDL_Event *event)
         }
 
         if (display_mode == CONTROLLER_MODE_TESTING) {
-            if ( GamepadButtonContains(reset_gyro_button, event->button.x, event->button.y)) {
+            if (GamepadButtonContains(GetGyroResetButton(gyro_elements), event->button.x, event->button.y)) {
                 ResetGyroOrientation(controller->imu_state);
             } else if (GamepadButtonContains(setup_mapping_button, event->button.x, event->button.y)) {
                 SetDisplayMode(CONTROLLER_MODE_BINDING);
@@ -2326,7 +2322,6 @@ SDL_AppResult SDLCALL SDL_AppIterate(void *appstate)
             
             RenderGamepadButton(setup_mapping_button);
             RenderGyroDisplay(gyro_elements, gamepad_elements, controller->gamepad);
-            RenderGamepadButton(reset_gyro_button);
             
         } else if (display_mode == CONTROLLER_MODE_BINDING) {
             DrawBindingTips(screen);
@@ -2493,14 +2488,8 @@ SDL_AppResult SDLCALL SDL_AppInit(void **appstate, int argc, char *argv[])
     SetGyroDisplayArea(gyro_elements, &area);
     InitCirclePoints3D();
 
-    reset_gyro_button = CreateGamepadButton(screen, "Recenter");
-    // Place the reset button to the bottom right of the gyro display area.
-    SDL_FRect reset_button_area;
-    reset_button_area.w = SDL_max(MINIMUM_BUTTON_WIDTH, GetGamepadButtonLabelWidth(reset_gyro_button) + 2 * BUTTON_PADDING);
-    reset_button_area.h = GetGamepadButtonLabelHeight(reset_gyro_button) + BUTTON_PADDING;
-    reset_button_area.x = area.x + area.w - reset_button_area.w - BUTTON_PADDING;
-    reset_button_area.y = area.y + area.h - reset_button_area.h - BUTTON_PADDING;
-    SetGamepadButtonArea(reset_gyro_button, &reset_button_area);
+    // TODO: let's do a restart_calibration_button so that the auto calibration doesn't kick in all the time, and we can hide noisey ui.
+    // But... it'd be good to be able to draw that in situ with the other gyro display elements - and even move the reset_gyro_button inside the gyro_elements too?
 
     gamepad_type = CreateGamepadTypeDisplay(screen);
     area.x = 0;
@@ -2584,7 +2573,6 @@ void SDLCALL SDL_AppQuit(void *appstate, SDL_AppResult result)
     DestroyGyroDisplay(gyro_elements);
     DestroyGamepadTypeDisplay(gamepad_type);
     DestroyJoystickDisplay(joystick_elements);
-    DestroyGamepadButton(reset_gyro_button);
     DestroyGamepadButton(setup_mapping_button);
     DestroyGamepadButton(done_mapping_button);
     DestroyGamepadButton(cancel_button);

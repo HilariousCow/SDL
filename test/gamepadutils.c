@@ -40,10 +40,7 @@ typedef struct
 
 struct Quaternion
 {
-    float x;
-    float y;
-    float z;
-    float w;
+    float x, y, z, w; 
 };
 
 static const Vector3 debug_cube_vertices[] = {
@@ -197,19 +194,16 @@ void DrawGyroCircle(
     }
 }
 
-#define COLOR_RED   255, 0, 0, 255
-#define COLOR_GREEN 0, 255, 0, 255
-#define COLOR_BLUE  0, 0, 255, 255
-#define COLOR_ORANGE 255, 128, 0, 255
+
 
 void DrawGyroDebugCircle(SDL_Renderer *renderer, const Quaternion *orientation, const SDL_FRect *bounds)
 {
     // Store current color
     Uint8 r, g, b, a;
     SDL_GetRenderDrawColor(renderer, &r, &g, &b, &a);
-    DrawGyroCircle(renderer, kCirclePoints3D_YZ_Plane, CIRCLE_SEGMENTS, orientation, bounds, COLOR_RED);  // X axis - pitch
-    DrawGyroCircle(renderer, kCirclePoints3D_XZ_Plane, CIRCLE_SEGMENTS, orientation, bounds, COLOR_GREEN); // Y axis - yaw
-    DrawGyroCircle(renderer, kCirclePoints3D_XY_Plane, CIRCLE_SEGMENTS, orientation, bounds, COLOR_BLUE); // Z axis - Roll
+    DrawGyroCircle(renderer, kCirclePoints3D_YZ_Plane, CIRCLE_SEGMENTS, orientation, bounds, GYRO_COLOR_RED);  // X axis - pitch
+    DrawGyroCircle(renderer, kCirclePoints3D_XZ_Plane, CIRCLE_SEGMENTS, orientation, bounds, GYRO_COLOR_GREEN); // Y axis - yaw
+    DrawGyroCircle(renderer, kCirclePoints3D_XY_Plane, CIRCLE_SEGMENTS, orientation, bounds, GYRO_COLOR_BLUE);  // Z axis - Roll
 
     // Restore current color
     SDL_SetRenderDrawColor(renderer, r, g, b, a);
@@ -236,7 +230,7 @@ void DrawAccelerometerDebugArrow(SDL_Renderer *renderer, const Quaternion *gyro_
     SDL_FPoint accel_screen = ProjectVec3ToRect(&rotated_accel, bounds);
 
     // Draw the line from origin to the rotated accelerometer vector
-    SDL_SetRenderDrawColor(renderer, COLOR_ORANGE); 
+    SDL_SetRenderDrawColor(renderer, GYRO_COLOR_ORANGE); 
     SDL_RenderLine(renderer, origin_screen.x, origin_screen.y, accel_screen.x, accel_screen.y);
 
     SDL_FRect arrow_head_rect = {
@@ -993,7 +987,7 @@ struct GyroDisplay
 {
     SDL_Renderer *renderer;
 
-    // Draw area
+    // Main draw area
     SDL_FRect area;
 
     // This part displays extra info from the IMUstate in order to figure out actual polling rates.
@@ -1001,10 +995,12 @@ struct GyroDisplay
     int reported_sensor_rate_hz;           /*hz - comes from HIDsdl implementation. Could be fixed, platform time, or true sensor time*/
     int estimated_sensor_rate_hz;          /*hz - our estimation of the actual polling rate by observing packets received*/
     float euler_displacement_angles[3];    /* pitch, yaw, roll */
-    Quaternion gyro_quaternion;            /* rotation since startup, comprised of each gyro speed packet times sensor delta time. */
+    Quaternion gyro_quaternion;            /* Rotation since startup/reset, comprised of each gyro speed packet times sensor delta time. */
     float drift_calibration_progress_frac; // 0..1
-    float accelerometer_noise_sq;              /* Distance between last noise and new noise. Used to indicate motion. Less*/
+    float accelerometer_noise_sq;          /* Distance between last noise and new noise. Used to indicate motion.*/
 
+    GamepadButton *reset_gyro_button;
+    GamepadButton *calibrate_gyro_button;
 };
 
 GyroDisplay *CreateGyroDisplay(SDL_Renderer *renderer)
@@ -1016,6 +1012,9 @@ GyroDisplay *CreateGyroDisplay(SDL_Renderer *renderer)
         SDL_zeroa(ctx->gyro_drift_solution);
         Quaternion quat_identity = { 0.0f, 0.0f, 0.0f, 1.0f };
         ctx->gyro_quaternion = quat_identity;
+
+        ctx->reset_gyro_button = CreateGamepadButton(renderer, "Recenter");
+        ctx->calibrate_gyro_button = CreateGamepadButton(renderer, "Recalibrate Drift");
     }
 
     return ctx;
@@ -1028,6 +1027,18 @@ void SetGyroDisplayArea(GyroDisplay *ctx, const SDL_FRect *area)
     }
 
     SDL_copyp(&ctx->area, area);
+
+    // Just hacking for now to see if this can be done.
+#define BUTTON_PADDING       12.0f
+#define MINIMUM_BUTTON_WIDTH 96.0f
+    
+    // Place the reset button to the bottom right of the gyro display area.
+    SDL_FRect reset_button_area;
+    reset_button_area.w = SDL_max(MINIMUM_BUTTON_WIDTH, GetGamepadButtonLabelWidth(ctx->reset_gyro_button) + 2 * BUTTON_PADDING);
+    reset_button_area.h = GetGamepadButtonLabelHeight(ctx->reset_gyro_button) + BUTTON_PADDING;
+    reset_button_area.x = area->x + area->w - reset_button_area.w - BUTTON_PADDING;
+    reset_button_area.y = area->y + area->h - reset_button_area.h - BUTTON_PADDING;
+    SetGamepadButtonArea(ctx->reset_gyro_button, &reset_button_area);
 }
 
 void SetGamepadDisplayDisplayMode(GamepadDisplay *ctx, ControllerDisplayMode display_mode)
@@ -1339,6 +1350,22 @@ void SetGamepadDisplayIMUValues(GyroDisplay *ctx, float *gyro_drift_solution, fl
     ctx->accelerometer_noise_sq = accelerometer_noise_sq;
 }
 
+extern GamepadButton *GetGyroResetButton(GyroDisplay *ctx)
+{
+    if (!ctx) {
+        return NULL;
+    }
+    return ctx->reset_gyro_button;
+}
+
+extern GamepadButton *GetGyroCalibrateButton(GyroDisplay *ctx)
+{
+    if (!ctx) {
+        return NULL;
+    }
+    return ctx->calibrate_gyro_button;
+}
+
 void RenderGamepadDisplay(GamepadDisplay *ctx, SDL_Gamepad *gamepad)
 {
     float x, y;
@@ -1636,6 +1663,10 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
     if (!ctx)
         return;
 
+    // TODO: setup layout differently now.
+    RenderGamepadButton(GetGyroResetButton(ctx));
+    RenderGamepadButton(GetGyroCalibrateButton(ctx));
+
     bool bHasAccelerometer = SDL_GamepadHasSensor(gamepad, SDL_SENSOR_ACCEL);
     bool bHasGyroscope = SDL_GamepadHasSensor(gamepad, SDL_SENSOR_GYRO);
     bool bHasIMU = bHasAccelerometer || bHasGyroscope;
@@ -1850,7 +1881,8 @@ void DestroyGyroDisplay(GyroDisplay *ctx)
     if (!ctx) {
         return;
     }
-
+    DestroyGamepadButton(ctx->reset_gyro_button);
+    DestroyGamepadButton(ctx->calibrate_gyro_button);
     SDL_free(ctx);
 }
 
