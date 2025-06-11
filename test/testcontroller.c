@@ -2322,11 +2322,10 @@ SDL_AppResult SDLCALL SDL_AppIterate(void *appstate)
         }
         RenderJoystickDisplay(joystick_elements, controller->joystick);
 
-        RenderGyroDisplay(gyro_elements, controller->gamepad);
-
         if (display_mode == CONTROLLER_MODE_TESTING) {
             
             RenderGamepadButton(setup_mapping_button);
+            RenderGyroDisplay(gyro_elements, gamepad_elements, controller->gamepad);
             
         } else if (display_mode == CONTROLLER_MODE_BINDING) {
             DrawBindingTips(screen);
@@ -2482,23 +2481,25 @@ SDL_AppResult SDLCALL SDL_AppInit(void **appstate, int argc, char *argv[])
     area.h = GAMEPAD_HEIGHT;
     SetGamepadDisplayArea(gamepad_elements, &area);
 
-    
-    reset_gyro_button = CreateGamepadButton(screen, "Reset Gyro Orientation");// Move relevant stuff inside of gyro elements. that includes redoing buttons or whatever.
-    area.w = SDL_max(MINIMUM_BUTTON_WIDTH, GetGamepadButtonLabelWidth(reset_gyro_button) + 2 * BUTTON_PADDING);
-    area.h = GetGamepadButtonLabelHeight(reset_gyro_button) + 2 * BUTTON_PADDING;
-    area.x = BUTTON_MARGIN;
-    area.y = SCREEN_HEIGHT - (area.h * 2) - BUTTON_MARGIN;
-
-    SetGamepadButtonArea(reset_gyro_button, &area);
     gyro_elements = CreateGyroDisplay(screen);
-    // Bottom right corner
-    area.w = 600;
-    area.h = 600;
+    const float vidReservedHeight = 64.0f;
+    // Bottom right third of the screen
+    area.w = (SCREEN_WIDTH * 0.7f);
+    area.h = (SCREEN_HEIGHT / 4.0f);
     area.x = SCREEN_WIDTH - area.w;
-    area.y = 0;
-    //...
+    area.y = SCREEN_HEIGHT - area.h - vidReservedHeight;
+
     SetGyroDisplayArea(gyro_elements, &area);
     InitCirclePoints3D();
+
+    reset_gyro_button = CreateGamepadButton(screen, "Recenter Gyro");
+    // Get the button position from the bottom right of the above
+    SDL_FRect reset_button_area;
+    reset_button_area.w = SDL_max(MINIMUM_BUTTON_WIDTH, GetGamepadButtonLabelWidth(reset_gyro_button) + 2 * BUTTON_PADDING);
+    reset_button_area.h = GetGamepadButtonLabelHeight(reset_gyro_button) + 2 * BUTTON_PADDING;
+    reset_button_area.x = area.x + area.w - reset_button_area.w - BUTTON_MARGIN;
+    reset_button_area.y = area.y + area.h - reset_button_area.h - BUTTON_MARGIN;
+    SetGamepadButtonArea(reset_gyro_button, &reset_button_area);
 
     gamepad_type = CreateGamepadTypeDisplay(screen);
     area.x = 0;
