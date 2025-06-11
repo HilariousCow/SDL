@@ -193,13 +193,14 @@ void ResetGyroOrientation(IMUState *imustate)
     imustate->integrated_rotation = quat_identity;
 }
 
-#define SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT 512
-#define SDL_GAMEPAD_IMU_MIN_POLLING_RATE_ESTIMATION_COUNT 2048
-    // calcuated the drift solution based on the accumulated gyro data
-// Per packet drift as opposed to per second drift, as there's less overhead when applying.
+// More samples = more accurate drift correction, but also more time to calibrate.
+#define SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT 1024
+
+// Average drift per packet as opposed to per second drift
+// This reduces a small amount of overhead when applying the drift correction.
 void FinalizeDriftSolution(IMUState *imustate)
 {
-    if (imustate->gyro_drift_sample_count > SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT) {
+    if (imustate->gyro_drift_sample_count >= SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT) {
         imustate->gyro_drift_solution[0] = imustate->gyro_drift_accumulator[0] / (float)imustate->gyro_drift_sample_count;
         imustate->gyro_drift_solution[1] = imustate->gyro_drift_accumulator[1] / (float)imustate->gyro_drift_sample_count;
         imustate->gyro_drift_solution[2] = imustate->gyro_drift_accumulator[2] / (float)imustate->gyro_drift_sample_count;
@@ -237,7 +238,7 @@ void SampleGyroPacketForDrift( IMUState *imustate )
         imustate->gyro_drift_accumulator[1] += imustate->gyro_data[1];
         imustate->gyro_drift_accumulator[2] += imustate->gyro_data[2];
 
-        if (imustate->gyro_drift_sample_count > SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT) {
+        if (imustate->gyro_drift_sample_count >= SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT) {
             FinalizeDriftSolution(imustate);
         }
     }    
@@ -1377,7 +1378,7 @@ static void HandleGamepadGyroEvent(SDL_Event *event)
     SDL_memcpy(controller->imu_state->gyro_data, event->gsensor.data, sizeof(controller->imu_state->gyro_data));
 }
 
-
+#define SDL_GAMEPAD_IMU_MIN_POLLING_RATE_ESTIMATION_COUNT 2048
 static void EstimatePacketRate(SDL_Event *event)
 {
     Uint64 now_ns = SDL_GetTicksNS();
