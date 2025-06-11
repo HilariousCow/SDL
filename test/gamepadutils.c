@@ -1717,17 +1717,22 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
         SDL_strlcpy(text, "Orientation:", sizeof(text));
         SDLTest_DrawString(ctx->renderer, colon_pos_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
 
-        /* Display a "degree" symbol in UTF-8 */
+        /* Pitch Readout */
+        
+        SDL_snprintf(text, sizeof(text), "Pitch: %6.2f%s", flPitchSinceStartDeg, DEGREE_UTF8);
+        SDLTest_DrawString(ctx->renderer, colon_pos_x + 2.0f, log_y, text);
 
-        SDL_snprintf(text, sizeof(text), "(p: %6.2f%s, y: %6.2f%s, r: %6.2f%s)",
-                     flPitchSinceStartDeg, DEGREE_UTF8,
-                     flYawSinceStartDeg, DEGREE_UTF8,
-                     flRollSinceStartDeg, DEGREE_UTF8);
+        /* Yaw Readout */
+        log_y += gamepadElements->button_height + 2.0f;
+        SDL_snprintf(text, sizeof(text), "  Yaw: %6.2f%s", flYawSinceStartDeg, DEGREE_UTF8);
+        SDLTest_DrawString(ctx->renderer, colon_pos_x + 2.0f, log_y, text);
 
+        /* Roll Readout */
+        log_y += gamepadElements->button_height + 2.0f;
+        SDL_snprintf(text, sizeof(text), " Roll: %6.2f%s", flRollSinceStartDeg, DEGREE_UTF8);
         SDLTest_DrawString(ctx->renderer, colon_pos_x + 2.0f, log_y, text);
 
         /* Display a simple 3D rendering of the gyro quaternion */
-
         if (ctx->gyro_quaternion.x != 0.0f || ctx->gyro_quaternion.y != 0.0f || ctx->gyro_quaternion.z != 0.0f || ctx->gyro_quaternion.w != 0.0f) {
 
             // Place in the bottom left of the principal rect
@@ -1747,22 +1752,6 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
             SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
             DrawGyroDebugCube(ctx->renderer, &ctx->gyro_quaternion, &gyro_preview_rect);
             DrawGyroDebugCircle(ctx->renderer, &ctx->gyro_quaternion, &gyro_preview_rect);
-
-            // Draw X and Y axis lines through the gizmo in order to do lineups
-            /*
-            SDL_SetRenderDrawColor(ctx->renderer, 200, 200, 200, 15); //  semi transparent.
-            SDL_RenderLine(ctx->renderer,
-                               gyro_preview_rect.x + gyro_preview_rect.w * 0.5f,
-                               gyro_preview_rect.y,
-                               gyro_preview_rect.x + gyro_preview_rect.w * 0.5f,
-                               gyro_preview_rect.y + gyro_preview_rect.h);
-
-            SDL_RenderLine(ctx->renderer,
-                           gyro_preview_rect.x,
-                           gyro_preview_rect.y + gyro_preview_rect.h * 0.5f,
-                           gyro_preview_rect.x + gyro_preview_rect.w,
-                           gyro_preview_rect.y + gyro_preview_rect.h * 0.5f);
-            */
 
             if (bHasAccelerometer) {
                 // We counter rotate the accelerometer value by the gyro quaternion, which _should_ point the accelerometer up (in monitor space) if the on board IMU is placed perfectly flat.

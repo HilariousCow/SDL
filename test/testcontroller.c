@@ -227,9 +227,10 @@ void SampleGyroPacketForDrift( IMUState *imustate )
 
     imustate->accelerometer_length_squared = accelerometer_difference[0] * accelerometer_difference[0] + accelerometer_difference[1] * accelerometer_difference[1] + accelerometer_difference[2] * accelerometer_difference[2];
 
-    const float flAccelerometerMovementThreshold = 0.15f;
+    // Ideal threshold will vary considerably depending on IMU. PS5 needs a low value (0.05f). Nintendo Switch needs a higher value (0.15f).
+    const float flAccelerometerMovementThreshold = 0.125f;
     if (imustate->accelerometer_length_squared > flAccelerometerMovementThreshold * flAccelerometerMovementThreshold) {
-        // reset the drift calibration if the accelerometer has moved significantly
+        // Reset the drift calibration if the accelerometer has moved significantly
         // but first, if we have enough gyro data, calculate the drift solution
         if (imustate->gyro_drift_sample_count > SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT) {
             CalculateDriftSolution(imustate);
