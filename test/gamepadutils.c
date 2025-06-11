@@ -1707,84 +1707,81 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
             float flNoiseFraction = SDL_clamp(SDL_sqrtf(ctx->accelerometer_noise_sq) / ACCELEROMETER_NOISE_THRESHOLD, 0.0f, 1.0f);
             bool bTooMuchNoise = (flNoiseFraction == 1.0f);
 
-            {            
-                float noise_bar_height = gamepadElements->button_height;
-                const SDL_FRect noise_bar_rect = {
-                    .x = recalibrate_button_area.x ,
-                    .y = recalibrate_button_area.y + recalibrate_button_area.h + BUTTON_PADDING,
-                    .w = recalibrate_button_area.w,
-                    .h = noise_bar_height
-                };
+            float noise_bar_height = gamepadElements->button_height;
+            const SDL_FRect noise_bar_rect = {
+                .x = recalibrate_button_area.x ,
+                .y = recalibrate_button_area.y + recalibrate_button_area.h + BUTTON_PADDING,
+                .w = recalibrate_button_area.w,
+                .h = noise_bar_height
+            };
 
-                // Adjust the noise bar rectangle based on the accelerometer noise value
-         
-                float noise_bar_fill_width = flNoiseFraction * noise_bar_rect.w; // scale the width based on the noise value
-                const SDL_FRect noise_bar_fill_rect = {
-                    .x = noise_bar_rect.x + (noise_bar_rect.w - noise_bar_fill_width) / 2.0f, // center the fill rectangle
-                    .y = noise_bar_rect.y,
-                    .w = noise_bar_fill_width,
-                    .h = noise_bar_height
-                };
+            // Adjust the noise bar rectangle based on the accelerometer noise value
+     
+            float noise_bar_fill_width = flNoiseFraction * noise_bar_rect.w; // scale the width based on the noise value
+            const SDL_FRect noise_bar_fill_rect = {
+                .x = noise_bar_rect.x + (noise_bar_rect.w - noise_bar_fill_width) / 2.0f, // center the fill rectangle
+                .y = noise_bar_rect.y,
+                .w = noise_bar_fill_width,
+                .h = noise_bar_height
+            };
 
-                // Set the color based on the noise value
-                Uint8 red = (Uint8)(flNoiseFraction * 255.0f);
-                Uint8 green = (Uint8)((1.0f - flNoiseFraction) * 255.0f);
-                SDL_SetRenderDrawColor(ctx->renderer, red, green, 0, 255); // red when high noise, green when low noise
-                SDL_RenderFillRect(ctx->renderer, &noise_bar_fill_rect);   // draw the filled rectangle
+            // Set the color based on the noise value
+            Uint8 red = (Uint8)(flNoiseFraction * 255.0f);
+            Uint8 green = (Uint8)((1.0f - flNoiseFraction) * 255.0f);
+            SDL_SetRenderDrawColor(ctx->renderer, red, green, 0, 255); // red when high noise, green when low noise
+            SDL_RenderFillRect(ctx->renderer, &noise_bar_fill_rect);   // draw the filled rectangle
 
-                SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
-                SDL_RenderRect(ctx->renderer, &noise_bar_rect);            // draw the outline rectangle
+            SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
+            SDL_RenderRect(ctx->renderer, &noise_bar_rect);            // draw the outline rectangle
 
-                // Explicit warning message if we detect too much movement
-                if (bTooMuchNoise) {
-                    SDL_strlcpy(text, "Place GamePad Down!", sizeof(text));
-                    SDLTest_DrawString(ctx->renderer, recalibrate_button_area.x, noise_bar_rect.y + noise_bar_rect.h + new_line_height, text);
-                } 
-                SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a); // restore color
-            }
+            // Explicit warning message if we detect too much movement
+            if (bTooMuchNoise) {
+                SDL_strlcpy(text, "Place GamePad Down!", sizeof(text));
+                SDLTest_DrawString(ctx->renderer, recalibrate_button_area.x, noise_bar_rect.y + noise_bar_rect.h + new_line_height, text);
+            } 
+            SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a); // restore color
 
             /* Drift progress bar */
             // Demonstrate how far we are through the drift progress, and how it resets when there's "high noise", i.e if flNoiseFraction == 1.0f
-            {
-                // Set the color based on the drift calibration progress fraction
-                SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255);
+            
+            // Set the color based on the drift calibration progress fraction
+            SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255);
 
-                SDL_FRect progress_bar_rect = {
-                    .x = recalibrate_button_area.x + BUTTON_PADDING,
-                    .y = recalibrate_button_area.y + recalibrate_button_area.h * 0.5f + BUTTON_PADDING * 0.5f,
-                    .w = recalibrate_button_area.w - BUTTON_PADDING * 2.0f,
-                    .h = BUTTON_PADDING * 0.5f
-                };
+            SDL_FRect progress_bar_rect = {
+                .x = recalibrate_button_area.x + BUTTON_PADDING,
+                .y = recalibrate_button_area.y + recalibrate_button_area.h * 0.5f + BUTTON_PADDING * 0.5f,
+                .w = recalibrate_button_area.w - BUTTON_PADDING * 2.0f,
+                .h = BUTTON_PADDING * 0.5f
+            };
 
-                // Adjust the drift bar rectangle based on the drift calibration progress fraction
-                
-                float drift_bar_fill_width = bTooMuchNoise ? 1.0f : ctx->drift_calibration_progress_frac * progress_bar_rect.w;
-                SDL_FRect progress_bar_fill = {
-                    .x = progress_bar_rect.x,
-                    .y = progress_bar_rect.y,
-                    .w = drift_bar_fill_width,
-                    .h = progress_bar_rect.h
-                };
-                // Set the color based on the drift calibration progress fraction
-                SDL_SetRenderDrawColor(ctx->renderer, 0, 255, 0, 255); // red when too much noise, green when low noise
+            // Adjust the drift bar rectangle based on the drift calibration progress fraction
+            
+            float drift_bar_fill_width = bTooMuchNoise ? 1.0f : ctx->drift_calibration_progress_frac * progress_bar_rect.w;
+            SDL_FRect progress_bar_fill = {
+                .x = progress_bar_rect.x,
+                .y = progress_bar_rect.y,
+                .w = drift_bar_fill_width,
+                .h = progress_bar_rect.h
+            };
+            // Set the color based on the drift calibration progress fraction
+            SDL_SetRenderDrawColor(ctx->renderer, 0, 255, 0, 255); // red when too much noise, green when low noise
 
-                // Now draw the bars with the filled, then empty rectangles
-                SDL_RenderFillRect(ctx->renderer, &progress_bar_fill); // draw the filled rectangle
-                SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
-                SDL_RenderRect(ctx->renderer, &progress_bar_rect);            // draw the outline rectangle
+            // Now draw the bars with the filled, then empty rectangles
+            SDL_RenderFillRect(ctx->renderer, &progress_bar_fill); // draw the filled rectangle
+            SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
+            SDL_RenderRect(ctx->renderer, &progress_bar_rect);            // draw the outline rectangle
 
-                // If there is too much movement, we are going to draw two diagonal red lines between the progress rect corners.
-                if (bTooMuchNoise) {
-                    SDL_SetRenderDrawColor(ctx->renderer, 255, 0, 0, 255); // red lines
-                    SDL_RenderLine(ctx->renderer,
-                    progress_bar_rect.x, progress_bar_rect.y,
-                    progress_bar_rect.x + progress_bar_rect.w, progress_bar_rect.y + progress_bar_rect.h);
-                    SDL_RenderLine(ctx->renderer,
-                    progress_bar_rect.x + progress_bar_rect.w, progress_bar_rect.y,
-                    progress_bar_rect.x, progress_bar_rect.y + progress_bar_rect.h);
-                }
-                SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a);         // restore color
+            // If there is too much movement, we are going to draw two diagonal red lines between the progress rect corners.
+            if (bTooMuchNoise) {
+                SDL_SetRenderDrawColor(ctx->renderer, 255, 0, 0, 255); // red lines
+                SDL_RenderLine(ctx->renderer,
+                progress_bar_rect.x, progress_bar_rect.y,
+                progress_bar_rect.x + progress_bar_rect.w, progress_bar_rect.y + progress_bar_rect.h);
+                SDL_RenderLine(ctx->renderer,
+                progress_bar_rect.x + progress_bar_rect.w, progress_bar_rect.y,
+                progress_bar_rect.x, progress_bar_rect.y + progress_bar_rect.h);
             }
+            SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a);         // restore color
         } else {
             /* 3D Gyro Gizmos
              * Display rotation since the start
@@ -1858,40 +1855,47 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
         }
     }
 
-   
     {
         /* Sensor timing section */
 
         // Anchor to bottom left of principle rect.
-        log_y = ctx->area.y + ctx->area.h - new_line_height * 2;
-        /* Display rate of gyro as provided by the HID implementation. This could be based on a hardware time stamp (PS5), or it could be generated by the HID implementation. */
-        {
-            SDL_strlcpy(text, "HID Sensor Time:", sizeof(text));
-            SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
-            if (ctx->reported_sensor_rate_hz > 0) {
-                /* Convert ms to seconds */
-                const Uint64 deltatime_us = (Uint64)1e6 / ctx->reported_sensor_rate_hz;
-                SDL_snprintf(text, sizeof(text), "%dus %dhz", deltatime_us, ctx->reported_sensor_rate_hz);
-            } else {
-                SDL_strlcpy(text, "????us ???hz", sizeof(text));
-            }
-            SDLTest_DrawString(ctx->renderer, text_offset_x + 2.0f, log_y, text);
-        }
+        float text_y_pos = ctx->area.y + ctx->area.h - new_line_height * 2;
+        /*
+         * Display rate of gyro as reported by the HID implementation.
+         * This could be based on a hardware time stamp (PS5), or it could be generated by the HID implementation.
+         * One should expect this to match the estimated rate below, assuming a wired connection.
+         */
 
-        /* Display the instrumentation's count of all packets received over time. This may represent a more accurate polling rate for the IMU */
-        {
-            log_y += new_line_height;
-            SDL_strlcpy(text, "Est.Sensor Time:", sizeof(text));
-            SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
-            if (ctx->estimated_sensor_rate_hz > 0) {
-                /* Convert ms to seconds */
-                Uint64 deltatime_us = (Uint64)1e6 / ctx->estimated_sensor_rate_hz;
-                SDL_snprintf(text, sizeof(text), "%dus %dhz", deltatime_us, ctx->estimated_sensor_rate_hz);
-            } else {
-                SDL_strlcpy(text, "????us ???hz", sizeof(text));
-            }
-            SDLTest_DrawString(ctx->renderer, text_offset_x + 2.0f, log_y, text);
+        SDL_strlcpy(text, "HID Sensor Time:", sizeof(text));
+        SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, text_y_pos, text);
+        if (ctx->reported_sensor_rate_hz > 0) {
+            /* Convert to micro seconds */
+            const Uint64 delta_time_us = (Uint64)1e6 / ctx->reported_sensor_rate_hz;
+            SDL_snprintf(text, sizeof(text), "%dus %dhz", delta_time_us, ctx->reported_sensor_rate_hz);
+        } else {
+            SDL_strlcpy(text, "????us ???hz", sizeof(text));
         }
+        SDLTest_DrawString(ctx->renderer, text_offset_x + 2.0f, text_y_pos, text);
+
+        /*
+         * Display the instrumentation's count of all sensor packets received over time.
+         * This may represent a more accurate polling rate for the IMU
+         * But only when using a wired connection.
+         * It does not necessarily reflect the rate at which the IMU is sampled.
+         */
+        
+        text_y_pos += new_line_height;
+        SDL_strlcpy(text, "Est.Sensor Time:", sizeof(text));
+        SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, text_y_pos, text);
+        if (ctx->estimated_sensor_rate_hz > 0) {
+            /* Convert to micro seconds */
+            const Uint64 delta_time_us = (Uint64)1e6 / ctx->estimated_sensor_rate_hz;
+            SDL_snprintf(text, sizeof(text), "%dus %dhz", delta_time_us, ctx->estimated_sensor_rate_hz);
+        } else {
+            SDL_strlcpy(text, "????us ???hz", sizeof(text));
+        }
+        SDLTest_DrawString(ctx->renderer, text_offset_x + 2.0f, text_y_pos, text);
+    
     }
 
     // Restore color
