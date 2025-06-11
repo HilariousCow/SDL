@@ -1846,10 +1846,6 @@ void RenderGyroGizmo(GyroDisplay *ctx, SDL_Gamepad *gamepad, float top)
         .h = gizmoSize
     };
 
-    // Draw background outline (optional for debug)
-    SDL_SetRenderDrawColor(ctx->renderer, 80, 80, 80, SDL_ALPHA_OPAQUE);
-    SDL_RenderRect(ctx->renderer, &gizmoRect);
-
     // Draw the rotated cube
     DrawGyroDebugCube(ctx->renderer, &ctx->gyro_quaternion, &gizmoRect);
 
