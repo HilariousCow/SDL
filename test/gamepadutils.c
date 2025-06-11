@@ -36,12 +36,7 @@
 typedef struct
 {
     float x, y, z;
-} Vec3;
-
-typedef struct
-{
-    float x, y; // screen space 2D projection
-} Vec2;
+} Vector3;
 
 struct Quaternion
 {
@@ -51,7 +46,7 @@ struct Quaternion
     float w;
 };
 
-static const Vec3 debug_cube_vertices[] = {
+static const Vector3 debug_cube_vertices[] = {
     { -1.0f, -1.0f, -1.0f },
     { 1.0f, -1.0f, -1.0f },
     { 1.0f, 1.0f, -1.0f },
@@ -69,7 +64,7 @@ static const int debug_cube_edges[][2] = {
 };
 
 
-static Vec3 RotateVectorByQuaternion(const Vec3 *v, const Quaternion *q)
+static Vector3 RotateVectorByQuaternion(const Vector3 *v, const Quaternion *q)
 {
     // v' = q * v * q^-1
     float x = v->x, y = v->y, z = v->z;
@@ -82,7 +77,7 @@ static Vec3 RotateVectorByQuaternion(const Vec3 *v, const Quaternion *q)
     float iw = -qx * x - qy * y - qz * z;
 
     // Result = result * conjugate(q)
-    Vec3 out;
+    Vector3 out;
     out.x = ix * qw + iw * -qx + iy * -qz - iz * -qy;
     out.y = iy * qw + iw * -qy + iz * -qx - ix * -qz;
     out.z = iz * qw + iw * -qz + ix * -qy - iy * -qx;
@@ -90,16 +85,16 @@ static Vec3 RotateVectorByQuaternion(const Vec3 *v, const Quaternion *q)
 }
 
 #ifdef GYRO_ISOMETRIC_PROJECTION
-static Vec2 ProjectVec3ToRect(const Vec3 *v, const SDL_FRect *rect)
+static SDL_FPoint ProjectVec3ToRect(const Vector3 *v, const SDL_FRect *rect)
 {
-    Vec2 out;
+    SDL_FPoint out;
     // Simple orthographic projection using X and Y; scale to fit into rect
     out.x = rect->x + (rect->w / 2.0f) + (v->x * (rect->w / 2.0f));
     out.y = rect->y + (rect->h / 2.0f) - (v->y * (rect->h / 2.0f)); // Y inverted
     return out;
 }
 #else
-static Vec2 ProjectVec3ToRect(const Vec3 *v, const SDL_FRect *rect)
+static SDL_FPoint ProjectVec3ToRect(const Vector3 *v, const SDL_FRect *rect)
 {
     // Perspective parameters
     const float verticalFOV_deg = 40.0f;
@@ -121,7 +116,7 @@ static Vec2 ProjectVec3ToRect(const Vec3 *v, const SDL_FRect *rect)
     float ndc_y = (v->y / relZ) / fovScaleY;
 
     // Convert to screen space
-    Vec2 out;
+    SDL_FPoint out;
     out.x = rect->x + (rect->w / 2.0f) + (ndc_x * rect->w / 2.0f);
     out.y = rect->y + (rect->h / 2.0f) - (ndc_y * rect->h / 2.0f); // flip Y
     return out;
@@ -131,24 +126,24 @@ static Vec2 ProjectVec3ToRect(const Vec3 *v, const SDL_FRect *rect)
 
 void DrawGyroDebugCube(SDL_Renderer *renderer, const Quaternion *orientation, const SDL_FRect *rect)
 {
-    Vec2 projected[8];
+    SDL_FPoint projected[8];
     for (int i = 0; i < 8; ++i) {
-        Vec3 rotated = RotateVectorByQuaternion(&debug_cube_vertices[i], orientation);
+        Vector3 rotated = RotateVectorByQuaternion(&debug_cube_vertices[i], orientation);
         projected[i] = ProjectVec3ToRect(&rotated, rect);
     }
 
     for (int i = 0; i < 12; ++i) {
-        const Vec2 p0 = projected[debug_cube_edges[i][0]];
-        const Vec2 p1 = projected[debug_cube_edges[i][1]];
+        const SDL_FPoint p0 = projected[debug_cube_edges[i][0]];
+        const SDL_FPoint p1 = projected[debug_cube_edges[i][1]];
         SDL_RenderLine(renderer, p0.x, p0.y, p1.x, p1.y);
     }
 }
 
 #define CIRCLE_SEGMENTS 64
 
-static Vec3 kCirclePoints3D_XY_Plane[CIRCLE_SEGMENTS];
-static Vec3 kCirclePoints3D_XZ_Plane[CIRCLE_SEGMENTS];
-static Vec3 kCirclePoints3D_YZ_Plane[CIRCLE_SEGMENTS];
+static Vector3 kCirclePoints3D_XY_Plane[CIRCLE_SEGMENTS];
+static Vector3 kCirclePoints3D_XZ_Plane[CIRCLE_SEGMENTS];
+static Vector3 kCirclePoints3D_YZ_Plane[CIRCLE_SEGMENTS];
 
 void InitCirclePoints3D(void)
 {
@@ -176,7 +171,7 @@ void InitCirclePoints3D(void)
 
 void DrawGyroCircle(
     SDL_Renderer *renderer,
-    const Vec3 *circlePoints,
+    const Vector3 *circlePoints,
     int numSegments,
     const Quaternion *orientation,
     const SDL_FRect *bounds,
@@ -190,8 +185,8 @@ void DrawGyroCircle(
     for (int i = 0; i <= numSegments; ++i) {
         int index = i % numSegments;
 
-        Vec3 rotated = RotateVectorByQuaternion(&circlePoints[index], orientation);
-        Vec2 screenPtVec2 = ProjectVec3ToRect(&rotated, bounds);
+        Vector3 rotated = RotateVectorByQuaternion(&circlePoints[index], orientation);
+        SDL_FPoint screenPtVec2 = ProjectVec3ToRect(&rotated, bounds);
         SDL_FPoint screenPt = { screenPtVec2.x, screenPtVec2.y };
 
         if (hasLast) {
