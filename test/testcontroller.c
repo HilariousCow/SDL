@@ -228,7 +228,7 @@ void SampleGyroPacketForDrift( IMUState *imustate )
     imustate->accelerometer_length_squared = accelerometer_difference[0] * accelerometer_difference[0] + accelerometer_difference[1] * accelerometer_difference[1] + accelerometer_difference[2] * accelerometer_difference[2];
 
     // Ideal threshold will vary considerably depending on IMU. PS5 needs a low value (0.05f). Nintendo Switch needs a higher value (0.15f).
-    const float flAccelerometerMovementThreshold = 0.125f;
+    const float flAccelerometerMovementThreshold = ACCELEROMETER_NOISE_THRESHOLD;
     if (imustate->accelerometer_length_squared > flAccelerometerMovementThreshold * flAccelerometerMovementThreshold) {
         // Reset the drift calibration if the accelerometer has moved significantly
         // but first, if we have enough gyro data, calculate the drift solution
@@ -1444,7 +1444,6 @@ static void HandleGamepadSensorEvent( SDL_Event* event )
         float drift_calibration_progress_frac = controller->imu_state->gyro_drift_sample_count / (float)SDL_GAMEPAD_IMU_MIN_GYRO_DRIFT_SAMPLE_COUNT;
         int reported_polling_rate_hz = sensorTimeStampDelta_ns > 0 ? (int)(SDL_NS_PER_SECOND / sensorTimeStampDelta_ns) : 0;
 
-        float accelerometer_noise = controller->imu_state->accelerometer_length_squared;
         // Send the results to the frontend
         SetGamepadDisplayIMUValues(gyro_elements,
             controller->imu_state->gyro_drift_solution,
@@ -1453,7 +1452,7 @@ static void HandleGamepadSensorEvent( SDL_Event* event )
             reported_polling_rate_hz,
             controller->imu_state->imu_estimated_sensor_rate,
             drift_calibration_progress_frac,
-            accelerometer_noise
+            controller->imu_state->accelerometer_length_squared
         );
 
         controller->imu_state->last_sensor_time_stamp_ns = event->gsensor.sensor_timestamp;

@@ -1003,7 +1003,7 @@ struct GyroDisplay
     float euler_displacement_angles[3];    /* pitch, yaw, roll */
     Quaternion gyro_quaternion;            /* rotation since startup, comprised of each gyro speed packet times sensor delta time. */
     float drift_calibration_progress_frac; // 0..1
-    float accelerometer_noise;              /* Distance between last noise and new noise. Used to indicate motion. Less*/
+    float accelerometer_noise_sq;              /* Distance between last noise and new noise. Used to indicate motion. Less*/
 
 };
 
@@ -1321,7 +1321,7 @@ bool BHasCachedGyroDriftSolution(GyroDisplay *ctx)
             ctx->gyro_drift_solution[2] != 0.0f);
 }
 
-void SetGamepadDisplayIMUValues(GyroDisplay *ctx, float *gyro_drift_solution, float *euler_displacement_angles, Quaternion *gyro_quaternion, int reported_senor_rate_hz, int estimated_sensor_rate_hz, float drift_calibration_progress_frac, float accelerometer_noise)
+void SetGamepadDisplayIMUValues(GyroDisplay *ctx, float *gyro_drift_solution, float *euler_displacement_angles, Quaternion *gyro_quaternion, int reported_senor_rate_hz, int estimated_sensor_rate_hz, float drift_calibration_progress_frac, float accelerometer_noise_sq)
 {
     if (!ctx) {
         return;
@@ -1336,7 +1336,7 @@ void SetGamepadDisplayIMUValues(GyroDisplay *ctx, float *gyro_drift_solution, fl
     SDL_memcpy(ctx->euler_displacement_angles, euler_displacement_angles, sizeof(ctx->euler_displacement_angles));
     ctx->gyro_quaternion = *gyro_quaternion;
     ctx->drift_calibration_progress_frac = drift_calibration_progress_frac;
-    ctx->accelerometer_noise = accelerometer_noise;
+    ctx->accelerometer_noise_sq = accelerometer_noise_sq;
 }
 
 void RenderGamepadDisplay(GamepadDisplay *ctx, SDL_Gamepad *gamepad)
@@ -1645,9 +1645,7 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
     const float x = ctx->area.x;
     float log_y = ctx->area.y; // we use this to march down the screen for text entries
     const float colon_pos_x = x + ctx->area.w / 4.0f;
-    //const float y_center = y + ctx->area.y / 2.0f;
-    
-    SDL_FRect dst;
+    const float colon_pos_x_indent = colon_pos_x + 64;
     Uint8 r, g, b, a;
     // Store Color
     SDL_GetRenderDrawColor(ctx->renderer, &r, &g, &b, &a);
@@ -1661,48 +1659,91 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
     /* Show gyro drift capture progress: */
     if (bHasGyroscope)
     {
-        log_y += gamepadElements->button_height + 2.0f;
-        SDL_strlcpy(text, "Drift:", sizeof(text));
-        SDLTest_DrawString(ctx->renderer, colon_pos_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
+        float flNoiseFraction = SDL_clamp(SDL_sqrtf(ctx->accelerometer_noise_sq) / ACCELEROMETER_NOISE_THRESHOLD, 0.0f, 1.0f);
+        // First, we should draw a "noise meter" based on the ctx->accelerometer_noise value
+        // This can be a progress bar style thing, but with a rectangle growing from the center. When the noise is high, the inside bar grows to fully fill the outline rectangle
+        {
+            log_y += gamepadElements->button_height + 2.0f; // shift down for the next line
 
-        float flFrac = ctx->drift_calibration_progress_frac;
-        float flPercent = flFrac * 100.0f;
+            // Create a holding rectangle and the noise bar rectangle. base these both on button height, and the width of the phrase "Noise:"
+            SDL_strlcpy(text, "Drift Noise Gate:", sizeof(text));
+            SDLTest_DrawString(ctx->renderer, colon_pos_x_indent - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
+            float noise_bar_width = 100.0f;
+            float noise_bar_height = gamepadElements->button_height; // half the button height
+            SDL_FRect noise_bar_rect = {
+                .x = colon_pos_x_indent + 2.0f,
+                .y = log_y + FONT_CHARACTER_SIZE / 2 - noise_bar_height / 2,
+                .w = noise_bar_width,
+                .h = noise_bar_height
+            };
+
+            // Adjust the noise bar rectangle based on the accelerometer noise value
      
-        if (flPercent == 0.0f) {
-            SDL_snprintf(text, sizeof(text), "Movement Detected!)");
-        } else if (bHasCachedDriftSolution) {
-            SDL_snprintf(text, sizeof(text), "(%.2f,%.2f,%.2f) (Progress: %3.0f%%)",
-                         ctx->gyro_drift_solution[0],
-                         ctx->gyro_drift_solution[1],
-                         ctx->gyro_drift_solution[2],
-                         flPercent);
-        } else {
-            SDL_snprintf(text, sizeof(text), "(Progress: %3.0f%%)", flPercent);
+            float noise_bar_fill_width = flNoiseFraction * noise_bar_width; // scale the width based on the noise value
+
+            SDL_FRect noise_bar_fill_rect = {
+                .x = noise_bar_rect.x + (noise_bar_rect.w - noise_bar_fill_width) / 2.0f, // center the fill rectangle
+                .y = noise_bar_rect.y,
+                .w = noise_bar_fill_width,
+                .h = noise_bar_height
+            };
+
+            // Set the color based on the noise value
+            Uint8 red = (Uint8)(flNoiseFraction * 255.0f);
+            Uint8 green = (Uint8)((1.0f - flNoiseFraction) * 255.0f);
+            SDL_SetRenderDrawColor(ctx->renderer, red, green, 0, 255); // red when high noise, green when low noise
+            SDL_RenderFillRect(ctx->renderer, &noise_bar_fill_rect);   // draw the filled rectangle
+
+            SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
+            SDL_RenderRect(ctx->renderer, &noise_bar_rect);            // draw the outline rectangle     
+            SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a);// restore color
         }
-        SDLTest_DrawString(ctx->renderer, colon_pos_x + 2.0f + FONT_CHARACTER_SIZE * 2, log_y, text);
+        /* Drift progress bar */
+        // Demonstrate how far we are through the drift progress, and how it resets when there's "high noise", i.e if flNoiseFraction == 1.0f
+        {
+            log_y += gamepadElements->button_height + 2.0f; // shift down for the next line
+            SDL_strlcpy(text, "Drift Progress:", sizeof(text));
+            SDLTest_DrawString(ctx->renderer, colon_pos_x_indent - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
+            float drift_bar_width = 100.0f;
+            float drift_bar_height = gamepadElements->button_height; // half the button height
+            SDL_FRect drift_bar_rect = {
+                .x = colon_pos_x_indent + 2.0f,
+                .y = log_y + FONT_CHARACTER_SIZE / 2 - drift_bar_height / 2,
+                .w = drift_bar_width,
+                .h = drift_bar_height
+            };
+            // Adjust the drift bar rectangle based on the drift calibration progress fraction
+            bool bTooMuchNoise = (flNoiseFraction == 1.0f);
+            float drift_bar_fill_width = bTooMuchNoise ? 1.0f : ctx->drift_calibration_progress_frac * drift_bar_width;
+            SDL_FRect drift_bar_fill_rect = {
+                .x = drift_bar_rect.x,
+                .y = drift_bar_rect.y,
+                .w = drift_bar_fill_width,
+                .h = drift_bar_height
+            };
+            // Set the color based on the drift calibration progress fraction
+            SDL_SetRenderDrawColor(ctx->renderer, 0, 255, 0, 255); // red when too much noise, green when low noise
+
+            // Now draw the bars with the filled, then empty rectangles
+            SDL_RenderFillRect(ctx->renderer, &drift_bar_fill_rect); // draw the filled rectangle
+            SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
+            SDL_RenderRect(ctx->renderer, &drift_bar_rect);            // draw the outline rectangle
+
+            // If there is too much noise, we are going to draw two diagonal red lines between the progress rect corners.
+            if (bTooMuchNoise) {
+                SDL_SetRenderDrawColor(ctx->renderer, 255, 0, 0, 255); // red lines
+                SDL_RenderLine(ctx->renderer,
+                               drift_bar_rect.x, drift_bar_rect.y,
+                               drift_bar_rect.x + drift_bar_rect.w, drift_bar_rect.y + drift_bar_rect.h);
+                SDL_RenderLine(ctx->renderer,
+                               drift_bar_rect.x + drift_bar_rect.w, drift_bar_rect.y,
+                               drift_bar_rect.x, drift_bar_rect.y + drift_bar_rect.h);
+            }
 
 
-        /* Noise Meter */
-        /* Movement detected - make red when high, green when low.*/
-        
-        if (flPercent == 0.0f) {
-          
-            Uint8 red = (Uint8)SDL_min(ctx->accelerometer_noise, 255.0f);
-            Uint8 green = (Uint8)(255.0f - SDL_min(ctx->accelerometer_noise, 255.0f));
-            SDL_SetTextureColorMod(gamepadElements->button_texture, red, green, 0);
-        } else if (bHasCachedDriftSolution) {
-            SDL_SetTextureColorMod(gamepadElements->button_texture, 0, 255, 0);
-        } else {
-            Uint8 red = (Uint8)((1.0f - flFrac) * 255.0f);
-            Uint8 green = (Uint8)(flFrac * 255.0f);
-            SDL_SetTextureColorMod(gamepadElements->button_texture, red, green, 0);
+            SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a);         // restore color
         }
-        dst.x = colon_pos_x - FONT_CHARACTER_SIZE + gamepadElements->button_width;
-        dst.y = log_y + FONT_CHARACTER_SIZE / 2 - gamepadElements->button_height / 2;
-        dst.w = gamepadElements->button_width;
-        dst.h = gamepadElements->button_height;
-        SDL_RenderTexture(ctx->renderer, gamepadElements->button_texture, NULL, &dst); // todo: replace with something better, like a noise bar. just draw a rect.
-        
+
     }
 
     /* Display rotation since the start
@@ -1766,7 +1807,7 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
         }
     }
 
-    const float colon_pos_for_timings = colon_pos_x + 64;
+    
     /* Display rate of gyro as provided by the HID implementation. This could be based on a hardware time stamp (PS5), or it could be generated by the HID implementation. */
     {
         if (ctx->reported_sensor_rate_hz > 0) {
@@ -1775,9 +1816,9 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
             // const float sensor_data_rate_hz = SDL_GetGamepadSensorDataRate(gamepad, SDL_SENSOR_GYRO);
             const Uint64 deltatime_us = (Uint64)1e6 / ctx->reported_sensor_rate_hz;
             SDL_strlcpy(text, "HID Sensor Time:", sizeof(text));
-            SDLTest_DrawString(ctx->renderer, colon_pos_for_timings - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
+            SDLTest_DrawString(ctx->renderer, colon_pos_x_indent - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
             SDL_snprintf(text, sizeof(text), "%dus %dhz", deltatime_us, ctx->reported_sensor_rate_hz);
-            SDLTest_DrawString(ctx->renderer, colon_pos_for_timings + 2.0f, log_y, text);
+            SDLTest_DrawString(ctx->renderer, colon_pos_x_indent + 2.0f, log_y, text);
         }
     }
 
@@ -1788,9 +1829,9 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
             /* Convert ms to seconds */
             Uint64 deltatime_us = (Uint64)1e6 / ctx->estimated_sensor_rate_hz;
             SDL_strlcpy(text, "Est.Sensor Time:", sizeof(text));
-            SDLTest_DrawString(ctx->renderer, colon_pos_for_timings - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
+            SDLTest_DrawString(ctx->renderer, colon_pos_x_indent - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
             SDL_snprintf(text, sizeof(text), "%dus %dhz", deltatime_us, ctx->estimated_sensor_rate_hz);
-            SDLTest_DrawString(ctx->renderer, colon_pos_for_timings + 2.0f, log_y, text);
+            SDLTest_DrawString(ctx->renderer, colon_pos_x_indent + 2.0f, log_y, text);
         }
     }
 
