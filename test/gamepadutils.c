@@ -1674,7 +1674,7 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
         return;
 
     // For debugging, draw the area rect
-    SDL_RenderRect(ctx->renderer, &ctx->area);
+    //SDL_RenderRect(ctx->renderer, &ctx->area);
 
     /* Show gyro drift capture progress: */
     if (bHasGyroscope)
@@ -1836,8 +1836,7 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
                 .h = gyro_gizmo_height
             };
 
-            SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
-            SDL_RenderRect(ctx->renderer, &gyro_preview_rect);
+            //SDL_RenderRect(ctx->renderer, &gyro_preview_rect); // for debug, to see layout area.
 
             SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
             DrawGyroDebugCube(ctx->renderer, &ctx->gyro_quaternion, &gyro_preview_rect);
@@ -1849,9 +1848,7 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
 
                 float accel_data[3];
                 SDL_GetGamepadSensorData(gamepad, SDL_SENSOR_ACCEL, accel_data, SDL_arraysize(accel_data));
-             
                 DrawAccelerometerDebugArrow(ctx->renderer, &ctx->gyro_quaternion, accel_data, &gyro_preview_rect);
-
             }
 
             SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a); // restore color
@@ -1865,8 +1862,6 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
             };
             SetGamepadButtonArea(GetGyroResetButton(ctx), &reset_button_area);
             RenderGamepadButton(GetGyroResetButton(ctx));
-
-            
         }
     }
 
