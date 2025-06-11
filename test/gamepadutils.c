@@ -1644,8 +1644,7 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
     char text[128];
     const float x = ctx->area.x;
     float log_y = ctx->area.y; // we use this to march down the screen for text entries
-    const float colon_pos_x = x + ctx->area.w / 4.0f;
-    const float colon_pos_x_indent = colon_pos_x + 64;
+    const float text_offset_x = x + ctx->area.w / 4.0f + 40.0f;
     Uint8 r, g, b, a;
     // Store Color
     SDL_GetRenderDrawColor(ctx->renderer, &r, &g, &b, &a);
@@ -1667,11 +1666,11 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
 
             // Create a holding rectangle and the noise bar rectangle. base these both on button height, and the width of the phrase "Noise:"
             SDL_strlcpy(text, "Drift Noise Gate:", sizeof(text));
-            SDLTest_DrawString(ctx->renderer, colon_pos_x_indent - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
+            SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
             float noise_bar_width = 100.0f;
             float noise_bar_height = gamepadElements->button_height; // half the button height
             SDL_FRect noise_bar_rect = {
-                .x = colon_pos_x_indent + 2.0f,
+                .x = text_offset_x + 2.0f,
                 .y = log_y + FONT_CHARACTER_SIZE / 2 - noise_bar_height / 2,
                 .w = noise_bar_width,
                 .h = noise_bar_height
@@ -1703,11 +1702,11 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
         {
             log_y += gamepadElements->button_height + 2.0f; // shift down for the next line
             SDL_strlcpy(text, "Drift Progress:", sizeof(text));
-            SDLTest_DrawString(ctx->renderer, colon_pos_x_indent - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
+            SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
             float drift_bar_width = 100.0f;
             float drift_bar_height = gamepadElements->button_height; // half the button height
             SDL_FRect drift_bar_rect = {
-                .x = colon_pos_x_indent + 2.0f,
+                .x = text_offset_x + 2.0f,
                 .y = log_y + FONT_CHARACTER_SIZE / 2 - drift_bar_height / 2,
                 .w = drift_bar_width,
                 .h = drift_bar_height
@@ -1755,30 +1754,32 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
         float flYawSinceStartDeg = ctx->euler_displacement_angles[1];
         float flRollSinceStartDeg = ctx->euler_displacement_angles[2];
 
-        SDL_strlcpy(text, "Orientation:", sizeof(text));
-        SDLTest_DrawString(ctx->renderer, colon_pos_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
-
         /* Pitch Readout */
-        
-        SDL_snprintf(text, sizeof(text), "Pitch: %6.2f%s", flPitchSinceStartDeg, DEGREE_UTF8);
-        SDLTest_DrawString(ctx->renderer, colon_pos_x + 2.0f, log_y, text);
+        SDL_strlcpy(text, "Pitch:", sizeof(text));
+        SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
+        SDL_snprintf(text, sizeof(text), "%6.2f%s", flPitchSinceStartDeg, DEGREE_UTF8);
+        SDLTest_DrawString(ctx->renderer, text_offset_x + 2.0f, log_y, text);
 
         /* Yaw Readout */
         log_y += gamepadElements->button_height + 2.0f;
-        SDL_snprintf(text, sizeof(text), "  Yaw: %6.2f%s", flYawSinceStartDeg, DEGREE_UTF8);
-        SDLTest_DrawString(ctx->renderer, colon_pos_x + 2.0f, log_y, text);
+        SDL_strlcpy(text, "Yaw:", sizeof(text));
+        SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
+        SDL_snprintf(text, sizeof(text), "%6.2f%s", flYawSinceStartDeg, DEGREE_UTF8);
+        SDLTest_DrawString(ctx->renderer, text_offset_x + 2.0f, log_y, text);
 
         /* Roll Readout */
         log_y += gamepadElements->button_height + 2.0f;
-        SDL_snprintf(text, sizeof(text), " Roll: %6.2f%s", flRollSinceStartDeg, DEGREE_UTF8);
-        SDLTest_DrawString(ctx->renderer, colon_pos_x + 2.0f, log_y, text);
+        SDL_strlcpy(text, "Roll:", sizeof(text));
+        SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
+        SDL_snprintf(text, sizeof(text), "%6.2f%s", flRollSinceStartDeg, DEGREE_UTF8);
+        SDLTest_DrawString(ctx->renderer, text_offset_x + 2.0f, log_y, text);
 
         /* Display a simple 3D rendering of the gyro quaternion */
         if (ctx->gyro_quaternion.x != 0.0f || ctx->gyro_quaternion.y != 0.0f || ctx->gyro_quaternion.z != 0.0f || ctx->gyro_quaternion.w != 0.0f) {
 
             // Place in the bottom left of the principal rect
-            float gyro_gizmo_width = 100.0f;
-            float gyro_gizmo_height = 100.0f;
+            float gyro_gizmo_width = 140.0f;
+            float gyro_gizmo_height = 140.0f;
             float button_padding = 36.0f;
             SDL_FRect gyro_preview_rect = {
                 .x = ctx->area.x + ctx->area.w - gyro_gizmo_width - 12.0f,
@@ -1804,35 +1805,40 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
                 DrawAccelerometerDebugArrow(ctx->renderer, &ctx->gyro_quaternion, accel_data, &gyro_preview_rect);
 
             }
+
+            SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a); // restore color
         }
     }
 
-    
     /* Display rate of gyro as provided by the HID implementation. This could be based on a hardware time stamp (PS5), or it could be generated by the HID implementation. */
     {
+        log_y += gamepadElements->button_height + 2.0f;
+        SDL_strlcpy(text, "HID Sensor Time:", sizeof(text));
+        SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
         if (ctx->reported_sensor_rate_hz > 0) {
-            log_y += gamepadElements->button_height + 2.0f;
             /* Convert ms to seconds */
             // const float sensor_data_rate_hz = SDL_GetGamepadSensorDataRate(gamepad, SDL_SENSOR_GYRO);
             const Uint64 deltatime_us = (Uint64)1e6 / ctx->reported_sensor_rate_hz;
-            SDL_strlcpy(text, "HID Sensor Time:", sizeof(text));
-            SDLTest_DrawString(ctx->renderer, colon_pos_x_indent - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
             SDL_snprintf(text, sizeof(text), "%dus %dhz", deltatime_us, ctx->reported_sensor_rate_hz);
-            SDLTest_DrawString(ctx->renderer, colon_pos_x_indent + 2.0f, log_y, text);
+        } else {
+            SDL_strlcpy(text, "????us ???hz", sizeof(text));
         }
+        SDLTest_DrawString(ctx->renderer, text_offset_x + 2.0f, log_y, text);
     }
 
-    /* Display the instrumentation's count of all packets recieved over time. This may represent a more accurate polling rate for the IMU */
+    /* Display the instrumentation's count of all packets received over time. This may represent a more accurate polling rate for the IMU */
     {
+        log_y += gamepadElements->button_height + 2.0f;
+        SDL_strlcpy(text, "Est.Sensor Time:", sizeof(text));
+        SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
         if (ctx->estimated_sensor_rate_hz > 0) {
-            log_y += gamepadElements->button_height + 2.0f;
             /* Convert ms to seconds */
             Uint64 deltatime_us = (Uint64)1e6 / ctx->estimated_sensor_rate_hz;
-            SDL_strlcpy(text, "Est.Sensor Time:", sizeof(text));
-            SDLTest_DrawString(ctx->renderer, colon_pos_x_indent - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
             SDL_snprintf(text, sizeof(text), "%dus %dhz", deltatime_us, ctx->estimated_sensor_rate_hz);
-            SDLTest_DrawString(ctx->renderer, colon_pos_x_indent + 2.0f, log_y, text);
+        } else {
+            SDL_strlcpy(text, "????us ???hz", sizeof(text));
         }
+        SDLTest_DrawString(ctx->renderer, text_offset_x + 2.0f, log_y, text);
     }
 
     // Restore color
