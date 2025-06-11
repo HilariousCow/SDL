@@ -1809,7 +1809,7 @@ float RenderEulerReadout(GyroDisplay *ctx, GamepadDisplay *gamepad_display )
     char text[128];
     float log_y = gyro_calibrate_button_rect.y + gyro_calibrate_button_rect.h + BUTTON_PADDING;
     const float new_line_height = gamepad_display->button_height + 2.0f;
-    float log_gyro_euler_text_x = gyro_calibrate_button_rect.x + gyro_calibrate_button_rect.w;
+    float log_gyro_euler_text_x = gyro_calibrate_button_rect.x;
 
     // Pitch Readout
     SDL_snprintf(text, sizeof(text), "Pitch: %6.2f%s", ctx->euler_displacement_angles[0], DEGREE_UTF8);
@@ -1863,13 +1863,16 @@ void RenderGyroGizmo(GyroDisplay *ctx, SDL_Gamepad *gamepad, float top)
         DrawAccelerometerDebugArrow(ctx->renderer, &ctx->gyro_quaternion, accel, &gizmoRect);
     }
 
+    // Follow the size of the main button, but position it below the gizmo
     GamepadButton *reset_button = GetGyroResetButton(ctx);
     if (reset_button) {
         SDL_FRect reset_area;
         GetGamepadButtonArea(reset_button, &reset_area);
         // Position the reset button below the gizmo
-        reset_area.x = gizmoRect.x + (gizmoRect.w - reset_area.w) * 0.5f;
-        reset_area.y = gizmoRect.y + gizmoRect.h + BUTTON_PADDING;
+        reset_area.x = btnArea.x;
+        reset_area.y = gizmoRect.y + gizmoRect.h + BUTTON_PADDING * 0.5f;
+        reset_area.w = btnArea.w;
+        reset_area.h = btnArea.h;
         SetGamepadButtonArea(reset_button, &reset_area);
         RenderGamepadButton(reset_button);
     }
