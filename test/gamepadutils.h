@@ -130,6 +130,7 @@ extern void DestroyJoystickDisplay(JoystickDisplay *ctx);
 typedef struct GamepadButton GamepadButton;
 
 extern GamepadButton *CreateGamepadButton(SDL_Renderer *renderer, const char *label);
+extern void SetGamepadButtonLabel(GamepadButton *ctx, const char *label);
 extern void SetGamepadButtonArea(GamepadButton *ctx, const SDL_FRect *area);
 extern void GetGamepadButtonArea(GamepadButton *ctx, SDL_FRect *area);
 extern void SetGamepadButtonHighlight(GamepadButton *ctx, bool highlight, bool pressed);

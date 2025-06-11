@@ -1013,8 +1013,7 @@ GyroDisplay *CreateGyroDisplay(SDL_Renderer *renderer)
         Quaternion quat_identity = { 0.0f, 0.0f, 0.0f, 1.0f };
         ctx->gyro_quaternion = quat_identity;
 
-
-        ctx->reset_gyro_button = CreateGamepadButton(renderer, "Recenter");
+        ctx->reset_gyro_button = CreateGamepadButton(renderer, "Reset View");
         ctx->calibrate_gyro_button = CreateGamepadButton(renderer, "Recalibrate Drift");
     }
 
@@ -1674,62 +1673,52 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
     if (!bHasIMU)
         return;
 
-    // For debugging, draw the area rect
-    //SDL_RenderRect(ctx->renderer, &ctx->area);
-
     /* Show gyro drift capture progress: */
     if (bHasGyroscope)
     {
-        if (bHasCachedDriftSolution) {
-            // Prompt the user to re-calibrate. Sometimes the calibration system is too lenient on the acceleration values, and the calibration can fire off
-            // This is the visual element for the button but the actual button click result resets the drift solution.
+        GamepadButton *start_calibration_button = GetGyroCalibrateButton(ctx);
 
-            // Display the drift solution numbers.
-            // Below that we have a "Recalibrate Drift" button.            
-            SDL_strlcpy(text, "Drift Correction:", sizeof(text));
-            SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
-            // Display scientific units - degrees per second.
-            SDL_snprintf(text, sizeof(text), "(%.2f, %.2f, %.2f)(%s/s)",
-                ctx->gyro_drift_solution[0], DEGREE_UTF8,
-                ctx->gyro_drift_solution[1], DEGREE_UTF8,
-                ctx->gyro_drift_solution[2], DEGREE_UTF8 );
-            SDLTest_DrawString(ctx->renderer, text_offset_x + 2.0f, log_y, text);
-           
-            log_y += new_line_height; // shift down for the next line
-            const SDL_FRect recalibrate_button_area = {
-                .x = x + BUTTON_PADDING,
-                .y = log_y + FONT_CHARACTER_SIZE / 2 - gamepadElements->button_height / 2,
-                .w = GetGamepadButtonLabelWidth(GetGyroCalibrateButton(ctx)) + 2 * BUTTON_PADDING,
-                .h = gamepadElements->button_height + BUTTON_PADDING
-            };
+        // Show the recalibration progress bar.
+        float recalibrate_button_width = GetGamepadButtonLabelWidth(start_calibration_button) + 2 * BUTTON_PADDING;
+        const SDL_FRect recalibrate_button_area = {
+            .x = ctx->area.x + ctx->area.w - recalibrate_button_width - BUTTON_PADDING,
+            .y = log_y + FONT_CHARACTER_SIZE / 2 - gamepadElements->button_height / 2,
+            .w = GetGamepadButtonLabelWidth(start_calibration_button) + 2.0f * BUTTON_PADDING,
+            .h = gamepadElements->button_height + BUTTON_PADDING * 2.0f
+        };
 
-            SetGamepadButtonArea(GetGyroCalibrateButton(ctx), &recalibrate_button_area);
-            RenderGamepadButton(GetGyroCalibrateButton(ctx));
 
-            log_y += recalibrate_button_area.h;
+        SDL_strlcpy(text, "Gyro Orientation:", sizeof(text));
+        SDLTest_DrawString(ctx->renderer, recalibrate_button_area.x, recalibrate_button_area.y - new_line_height, text);
+
+        if ( !bHasCachedDriftSolution ) {
+            SDL_snprintf(text, sizeof(text), "Progress: %3.0f%% ", ctx->drift_calibration_progress_frac * 100.0f);
+        } else {
+            SDL_strlcpy(text, "Calibrate Drift", sizeof(text));
         }
-        else
-        {
+        SetGamepadButtonLabel(start_calibration_button, text);
+        SetGamepadButtonArea(GetGyroCalibrateButton(ctx), &recalibrate_button_area);
+        RenderGamepadButton(GetGyroCalibrateButton(ctx));
+
+        log_y += recalibrate_button_area.h;
+
+        if (!bHasCachedDriftSolution) {
+            
             float flNoiseFraction = SDL_clamp(SDL_sqrtf(ctx->accelerometer_noise_sq) / ACCELEROMETER_NOISE_THRESHOLD, 0.0f, 1.0f);
-            // First, we should draw a "noise meter" based on the ctx->accelerometer_noise value
-            // This can be a progress bar style thing, but with a rectangle growing from the center. When the noise is high, the inside bar grows to fully fill the outline rectangle
-            {
-                // Create a holding rectangle and the noise bar rectangle. base these both on button height, and the width of the phrase "Noise:"
-                SDL_strlcpy(text, "Drift Noise Gate:", sizeof(text));
-                SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
-                float noise_bar_width = 100.0f;
-                float noise_bar_height = gamepadElements->button_height; // half the button height
+            bool bTooMuchNoise = (flNoiseFraction == 1.0f);
+
+            {            
+                float noise_bar_height = gamepadElements->button_height;
                 const SDL_FRect noise_bar_rect = {
-                    .x = text_offset_x + 2.0f,
-                    .y = log_y + FONT_CHARACTER_SIZE / 2 - noise_bar_height / 2,
-                    .w = noise_bar_width,
+                    .x = recalibrate_button_area.x ,
+                    .y = recalibrate_button_area.y + recalibrate_button_area.h + BUTTON_PADDING,
+                    .w = recalibrate_button_area.w,
                     .h = noise_bar_height
                 };
 
                 // Adjust the noise bar rectangle based on the accelerometer noise value
          
-                float noise_bar_fill_width = flNoiseFraction * noise_bar_width; // scale the width based on the noise value
-
+                float noise_bar_fill_width = flNoiseFraction * noise_bar_rect.w; // scale the width based on the noise value
                 const SDL_FRect noise_bar_fill_rect = {
                     .x = noise_bar_rect.x + (noise_bar_rect.w - noise_bar_fill_width) / 2.0f, // center the fill rectangle
                     .y = noise_bar_rect.y,
@@ -1744,128 +1733,132 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
                 SDL_RenderFillRect(ctx->renderer, &noise_bar_fill_rect);   // draw the filled rectangle
 
                 SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
-                SDL_RenderRect(ctx->renderer, &noise_bar_rect);            // draw the outline rectangle     
-                SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a);// restore color
+                SDL_RenderRect(ctx->renderer, &noise_bar_rect);            // draw the outline rectangle
+
+                // Explicit warning message if we detect too much movement
+                if (bTooMuchNoise) {
+                    SDL_strlcpy(text, "Place GamePad Down!", sizeof(text));
+                    SDLTest_DrawString(ctx->renderer, recalibrate_button_area.x, noise_bar_rect.y + noise_bar_rect.h + new_line_height, text);
+                } 
+                SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a); // restore color
             }
+
             /* Drift progress bar */
             // Demonstrate how far we are through the drift progress, and how it resets when there's "high noise", i.e if flNoiseFraction == 1.0f
             {
-                log_y += new_line_height; // shift down for the next line
-                SDL_strlcpy(text, "Drift Progress:", sizeof(text));
-                SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
-                float drift_bar_width = 100.0f;
-                float drift_bar_height = gamepadElements->button_height; // half the button height
-                SDL_FRect drift_bar_rect = {
-                    .x = text_offset_x + 2.0f,
-                    .y = log_y + FONT_CHARACTER_SIZE / 2 - drift_bar_height / 2,
-                    .w = drift_bar_width,
-                    .h = drift_bar_height
+                // Set the color based on the drift calibration progress fraction
+                SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255);
+
+                SDL_FRect progress_bar_rect = {
+                    .x = recalibrate_button_area.x + BUTTON_PADDING,
+                    .y = recalibrate_button_area.y + recalibrate_button_area.h * 0.5f + BUTTON_PADDING * 0.5f,
+                    .w = recalibrate_button_area.w - BUTTON_PADDING * 2.0f,
+                    .h = BUTTON_PADDING * 0.5f
                 };
+
                 // Adjust the drift bar rectangle based on the drift calibration progress fraction
-                bool bTooMuchNoise = (flNoiseFraction == 1.0f);
-                float drift_bar_fill_width = bTooMuchNoise ? 1.0f : ctx->drift_calibration_progress_frac * drift_bar_width;
-                SDL_FRect drift_bar_fill_rect = {
-                    .x = drift_bar_rect.x,
-                    .y = drift_bar_rect.y,
+                
+                float drift_bar_fill_width = bTooMuchNoise ? 1.0f : ctx->drift_calibration_progress_frac * progress_bar_rect.w;
+                SDL_FRect progress_bar_fill = {
+                    .x = progress_bar_rect.x,
+                    .y = progress_bar_rect.y,
                     .w = drift_bar_fill_width,
-                    .h = drift_bar_height
+                    .h = progress_bar_rect.h
                 };
                 // Set the color based on the drift calibration progress fraction
                 SDL_SetRenderDrawColor(ctx->renderer, 0, 255, 0, 255); // red when too much noise, green when low noise
 
                 // Now draw the bars with the filled, then empty rectangles
-                SDL_RenderFillRect(ctx->renderer, &drift_bar_fill_rect); // draw the filled rectangle
+                SDL_RenderFillRect(ctx->renderer, &progress_bar_fill); // draw the filled rectangle
                 SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
-                SDL_RenderRect(ctx->renderer, &drift_bar_rect);            // draw the outline rectangle
+                SDL_RenderRect(ctx->renderer, &progress_bar_rect);            // draw the outline rectangle
 
                 // If there is too much movement, we are going to draw two diagonal red lines between the progress rect corners.
                 if (bTooMuchNoise) {
                     SDL_SetRenderDrawColor(ctx->renderer, 255, 0, 0, 255); // red lines
                     SDL_RenderLine(ctx->renderer,
-                    drift_bar_rect.x, drift_bar_rect.y,
-                    drift_bar_rect.x + drift_bar_rect.w, drift_bar_rect.y + drift_bar_rect.h);
+                    progress_bar_rect.x, progress_bar_rect.y,
+                    progress_bar_rect.x + progress_bar_rect.w, progress_bar_rect.y + progress_bar_rect.h);
                     SDL_RenderLine(ctx->renderer,
-                    drift_bar_rect.x + drift_bar_rect.w, drift_bar_rect.y,
-                    drift_bar_rect.x, drift_bar_rect.y + drift_bar_rect.h);
+                    progress_bar_rect.x + progress_bar_rect.w, progress_bar_rect.y,
+                    progress_bar_rect.x, progress_bar_rect.y + progress_bar_rect.h);
                 }
                 SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a);         // restore color
             }
-        }
-    }
+        } else {
+            /* 3D Gyro Gizmos
+             * Display rotation since the start
+             * But only show after we have a calibration solution or it's misleading.
+             */
+            
+            log_y += new_line_height;
+            float log_gyro_euler_text_x = recalibrate_button_area.x + recalibrate_button_area.w * 0.5f;
+            float flPitchSinceStartDeg = ctx->euler_displacement_angles[0];
+            float flYawSinceStartDeg = ctx->euler_displacement_angles[1];
+            float flRollSinceStartDeg = ctx->euler_displacement_angles[2];
 
-    /* 3D Gyro Gizmos
-     * Display rotation since the start
-     * But only show after we have a calibration solution or it's misleading.
-     */
-    if (bHasCachedDriftSolution) {
-        log_y += new_line_height;
-        float flPitchSinceStartDeg = ctx->euler_displacement_angles[0];
-        float flYawSinceStartDeg = ctx->euler_displacement_angles[1];
-        float flRollSinceStartDeg = ctx->euler_displacement_angles[2];
+            /* Pitch Readout */
+            SDL_strlcpy(text, "Pitch:", sizeof(text));
+            SDLTest_DrawString(ctx->renderer, log_gyro_euler_text_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
+            SDL_snprintf(text, sizeof(text), "%6.2f%s", flPitchSinceStartDeg, DEGREE_UTF8);
+            SDLTest_DrawString(ctx->renderer, log_gyro_euler_text_x + 2.0f, log_y, text);
 
-        /* Pitch Readout */
-        SDL_strlcpy(text, "Pitch:", sizeof(text));
-        SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
-        SDL_snprintf(text, sizeof(text), "%6.2f%s", flPitchSinceStartDeg, DEGREE_UTF8);
-        SDLTest_DrawString(ctx->renderer, text_offset_x + 2.0f, log_y, text);
+            /* Yaw Readout */
+            log_y += new_line_height;
+            SDL_strlcpy(text, "Yaw:", sizeof(text));
+            SDLTest_DrawString(ctx->renderer, log_gyro_euler_text_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
+            SDL_snprintf(text, sizeof(text), "%6.2f%s", flYawSinceStartDeg, DEGREE_UTF8);
+            SDLTest_DrawString(ctx->renderer, log_gyro_euler_text_x + 2.0f, log_y, text);
 
-        /* Yaw Readout */
-        log_y += new_line_height;
-        SDL_strlcpy(text, "Yaw:", sizeof(text));
-        SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
-        SDL_snprintf(text, sizeof(text), "%6.2f%s", flYawSinceStartDeg, DEGREE_UTF8);
-        SDLTest_DrawString(ctx->renderer, text_offset_x + 2.0f, log_y, text);
+            /* Roll Readout */
+            log_y += new_line_height;
+            SDL_strlcpy(text, "Roll:", sizeof(text));
+            SDLTest_DrawString(ctx->renderer, log_gyro_euler_text_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
+            SDL_snprintf(text, sizeof(text), "%6.2f%s", flRollSinceStartDeg, DEGREE_UTF8);
+            SDLTest_DrawString(ctx->renderer, log_gyro_euler_text_x + 2.0f, log_y, text);
 
-        /* Roll Readout */
-        log_y += new_line_height;
-        SDL_strlcpy(text, "Roll:", sizeof(text));
-        SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
-        SDL_snprintf(text, sizeof(text), "%6.2f%s", flRollSinceStartDeg, DEGREE_UTF8);
-        SDLTest_DrawString(ctx->renderer, text_offset_x + 2.0f, log_y, text);
+            /* Display a simple 3D rendering of the gyro quaternion */
+            if (ctx->gyro_quaternion.x != 0.0f || ctx->gyro_quaternion.y != 0.0f || ctx->gyro_quaternion.z != 0.0f || ctx->gyro_quaternion.w != 0.0f) {
 
-        /* Display a simple 3D rendering of the gyro quaternion */
-        if (ctx->gyro_quaternion.x != 0.0f || ctx->gyro_quaternion.y != 0.0f || ctx->gyro_quaternion.z != 0.0f || ctx->gyro_quaternion.w != 0.0f) {
+                // Place in the bottom left of the principal rect
+                SDL_FRect gyro_preview_rect = {
+                    .x = recalibrate_button_area.x,
+                    .y = log_y + new_line_height,
+                    .w = recalibrate_button_area.w,
+                    .h = recalibrate_button_area.w
+                };
 
-            // Place in the bottom left of the principal rect
-            float gyro_gizmo_width = 140.0f;
-            float gyro_gizmo_height = 140.0f;
-            float button_padding = 36.0f;
-            SDL_FRect gyro_preview_rect = {
-                .x = ctx->area.x + ctx->area.w - gyro_gizmo_width - 12.0f,
-                .y = ctx->area.y + ctx->area.h - gyro_gizmo_height - button_padding,
-                .w = gyro_gizmo_width,
-                .h = gyro_gizmo_height
-            };
+                // SDL_RenderRect(ctx->renderer, &gyro_preview_rect); // for debug, to see layout area.
 
-            //SDL_RenderRect(ctx->renderer, &gyro_preview_rect); // for debug, to see layout area.
+                SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
+                DrawGyroDebugCube(ctx->renderer, &ctx->gyro_quaternion, &gyro_preview_rect);
+                DrawGyroDebugCircle(ctx->renderer, &ctx->gyro_quaternion, &gyro_preview_rect);
 
-            SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
-            DrawGyroDebugCube(ctx->renderer, &ctx->gyro_quaternion, &gyro_preview_rect);
-            DrawGyroDebugCircle(ctx->renderer, &ctx->gyro_quaternion, &gyro_preview_rect);
+                if (bHasAccelerometer) {
+                    // We counter rotate the accelerometer value by the gyro quaternion, which _should_ point the accelerometer up (in monitor space) if the on board IMU is placed perfectly flat.
+                    // Note, the pontoons of the controller can case the natural resting angle of the controller to be off a little bit.
 
-            if (bHasAccelerometer) {
-                // We counter rotate the accelerometer value by the gyro quaternion, which _should_ point the accelerometer up (in monitor space) if the on board IMU is placed perfectly flat.
-                // Note, the pontoons of the controller can case the natural resting angle of the controller to be off a little bit.
+                    float accel_data[3];
+                    SDL_GetGamepadSensorData(gamepad, SDL_SENSOR_ACCEL, accel_data, SDL_arraysize(accel_data));
+                    DrawAccelerometerDebugArrow(ctx->renderer, &ctx->gyro_quaternion, accel_data, &gyro_preview_rect);
+                }
 
-                float accel_data[3];
-                SDL_GetGamepadSensorData(gamepad, SDL_SENSOR_ACCEL, accel_data, SDL_arraysize(accel_data));
-                DrawAccelerometerDebugArrow(ctx->renderer, &ctx->gyro_quaternion, accel_data, &gyro_preview_rect);
+                SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a); // restore color
+
+                // Update the reset button so that it matches the witch/position of the gyro_preview_rect, sitting below with a small gap
+                const SDL_FRect reset_button_area = {
+                    .x = recalibrate_button_area.x,
+                    .y = gyro_preview_rect.y + gyro_preview_rect.h + BUTTON_PADDING * 0.5f,
+                    .w = recalibrate_button_area.w,
+                    .h = recalibrate_button_area.h
+                };
+                SetGamepadButtonArea(GetGyroResetButton(ctx), &reset_button_area);
+                RenderGamepadButton(GetGyroResetButton(ctx));
             }
-
-            SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a); // restore color
-
-            // Update the reset button so that it matches the witch/position of the gyro_preview_rect, sitting below with a small gap
-            const SDL_FRect reset_button_area = {
-                .x = gyro_preview_rect.x,
-                .y = gyro_preview_rect.y + gyro_preview_rect.h + BUTTON_PADDING * 0.5f,
-                .w = SDL_max(gyro_preview_rect.h, GetGamepadButtonLabelWidth(GetGyroResetButton(ctx)) + 2 * BUTTON_PADDING),
-                .h = gamepadElements->button_height + BUTTON_PADDING
-            };
-            SetGamepadButtonArea(GetGyroResetButton(ctx), &reset_button_area);
-            RenderGamepadButton(GetGyroResetButton(ctx));
         }
     }
 
+   
     {
         /* Sensor timing section */
 
@@ -2540,6 +2533,8 @@ struct GamepadButton
     bool pressed;
 };
 
+
+
 GamepadButton *CreateGamepadButton(SDL_Renderer *renderer, const char *label)
 {
     GamepadButton *ctx = SDL_calloc(1, sizeof(*ctx));
@@ -2549,13 +2544,25 @@ GamepadButton *CreateGamepadButton(SDL_Renderer *renderer, const char *label)
         ctx->background = CreateTexture(renderer, gamepad_button_background_bmp, gamepad_button_background_bmp_len);
         SDL_GetTextureSize(ctx->background, &ctx->background_width, &ctx->background_height);
 
-        ctx->label = SDL_strdup(label);
-        ctx->label_width = (float)(FONT_CHARACTER_SIZE * SDL_strlen(label));
-        ctx->label_height = (float)FONT_CHARACTER_SIZE;
+        SetGamepadButtonLabel(ctx, label);
     }
     return ctx;
 }
 
+void SetGamepadButtonLabel(GamepadButton *ctx, const char *label)
+{
+    if (!ctx) {
+        return;
+    }
+
+    if (ctx->label) {
+        SDL_free(ctx->label);
+    }
+
+    ctx->label = SDL_strdup(label);
+    ctx->label_width = (float)(FONT_CHARACTER_SIZE * SDL_strlen(label));
+    ctx->label_height = (float)FONT_CHARACTER_SIZE;
+}
 void SetGamepadButtonArea(GamepadButton *ctx, const SDL_FRect *area)
 {
     if (!ctx) {

@@ -2480,7 +2480,7 @@ SDL_AppResult SDLCALL SDL_AppInit(void **appstate, int argc, char *argv[])
     const float vidReservedHeight = 24.0f;
     // Bottom right third of the screen
     area.w = SCREEN_WIDTH * 0.375f;
-    area.h = SCREEN_HEIGHT * 0.345f;
+    area.h = SCREEN_HEIGHT * 0.475f;
     area.x = SCREEN_WIDTH - area.w;
     area.y = SCREEN_HEIGHT - area.h - vidReservedHeight;
 
