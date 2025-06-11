@@ -1733,7 +1733,7 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
             // Place in the bottom left of the principal rect
             float gyro_gizmo_width = 100.0f;
             float gyro_gizmo_height = 100.0f;
-            float button_padding = 64.0f;
+            float button_padding = 36.0f;
             SDL_FRect gyro_preview_rect = {
                 .x = ctx->area.x + ctx->area.w - gyro_gizmo_width - 12.0f,
                 .y = ctx->area.y + ctx->area.h - gyro_gizmo_height - button_padding,
