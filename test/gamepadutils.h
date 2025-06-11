@@ -18,6 +18,7 @@ typedef enum
 {
     CONTROLLER_MODE_TESTING,
     CONTROLLER_MODE_BINDING,
+    // TODO: Add a new mode for gyro calibration testing
 } ControllerDisplayMode;
 
 enum
@@ -53,6 +54,13 @@ enum
 #define GYRO_COLOR_BLUE         0, 0, 255, SDL_ALPHA_OPAQUE
 #define GYRO_COLOR_ORANGE       255, 128, 0, SDL_ALPHA_OPAQUE
 
+/* Shared layout constants */
+#define BUTTON_PADDING          12.0f
+#define MINIMUM_BUTTON_WIDTH 96.0f
+
+/*  Symbol */
+#define DEGREE_UTF8 "\xC2\xB0"
+#define SQUARED_UTF8 "\xC2\xB2"
 /* Gamepad image display */
 
 extern GamepadImage *CreateGamepadImage(SDL_Renderer *renderer);

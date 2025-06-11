@@ -1013,6 +1013,7 @@ GyroDisplay *CreateGyroDisplay(SDL_Renderer *renderer)
         Quaternion quat_identity = { 0.0f, 0.0f, 0.0f, 1.0f };
         ctx->gyro_quaternion = quat_identity;
 
+
         ctx->reset_gyro_button = CreateGamepadButton(renderer, "Recenter");
         ctx->calibrate_gyro_button = CreateGamepadButton(renderer, "Recalibrate Drift");
     }
@@ -1027,11 +1028,7 @@ void SetGyroDisplayArea(GyroDisplay *ctx, const SDL_FRect *area)
     }
 
     SDL_copyp(&ctx->area, area);
-
-    // Just hacking for now to see if this can be done.
-#define BUTTON_PADDING       12.0f
-#define MINIMUM_BUTTON_WIDTH 96.0f
-    
+        
     // Place the reset button to the bottom right of the gyro display area.
     SDL_FRect reset_button_area;
     reset_button_area.w = SDL_max(MINIMUM_BUTTON_WIDTH, GetGamepadButtonLabelWidth(ctx->reset_gyro_button) + 2 * BUTTON_PADDING);
@@ -1625,19 +1622,15 @@ void RenderGamepadDisplay(GamepadDisplay *ctx, SDL_Gamepad *gamepad)
             if (has_accel) {
                 SDL_strlcpy(text, "Accelerometer:", sizeof(text));
                 SDLTest_DrawString(ctx->renderer, x + center - SDL_strlen(text) * FONT_CHARACTER_SIZE, y, text);
-                SDL_snprintf(text, sizeof(text), "(%.2f,%.2f,%.2f)", ctx->accel_data[0], ctx->accel_data[1], ctx->accel_data[2]);
+                SDL_snprintf(text, sizeof(text), "(%.2f,%.2f,%.2f) (m/s%s)", ctx->accel_data[0], ctx->accel_data[1], ctx->accel_data[2], SQUARED_UTF8 );
                 SDLTest_DrawString(ctx->renderer, x + center + 2.0f, y, text);
-
                 y += ctx->button_height + 2.0f;
             }
 
             if (has_gyro) {
-
-                #define DEGREE_UTF8 "\xC2\xB0"
-
                 SDL_strlcpy(text, "Gyro:", sizeof(text));
                 SDLTest_DrawString(ctx->renderer, x + center - SDL_strlen(text) * FONT_CHARACTER_SIZE, y, text);
-                SDL_snprintf(text, sizeof(text), "(%.2f,%.2f,%.2f)", ctx->gyro_data[0], ctx->gyro_data[1], ctx->gyro_data[2]);
+                SDL_snprintf(text, sizeof(text), "(%.2f,%.2f,%.2f) (%s/s)", ctx->gyro_data[0], ctx->gyro_data[1], ctx->gyro_data[2], DEGREE_UTF8 );
                 SDLTest_DrawString(ctx->renderer, x + center + 2.0f, y, text);
             }
 
@@ -1663,10 +1656,6 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
     if (!ctx)
         return;
 
-    // TODO: setup layout differently now.
-    RenderGamepadButton(GetGyroResetButton(ctx));
-    RenderGamepadButton(GetGyroCalibrateButton(ctx));
-
     bool bHasAccelerometer = SDL_GamepadHasSensor(gamepad, SDL_SENSOR_ACCEL);
     bool bHasGyroscope = SDL_GamepadHasSensor(gamepad, SDL_SENSOR_GYRO);
     bool bHasIMU = bHasAccelerometer || bHasGyroscope;
@@ -1674,11 +1663,12 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
 
     char text[128];
     const float x = ctx->area.x;
-    float log_y = ctx->area.y; // we use this to march down the screen for text entries
+    float log_y = ctx->area.y + BUTTON_PADDING; // we use this to march down the screen for text entries
     const float text_offset_x = x + ctx->area.w / 4.0f + 40.0f;
     Uint8 r, g, b, a;
     // Store Color
     SDL_GetRenderDrawColor(ctx->renderer, &r, &g, &b, &a);
+
     // For now only support _both_ IMU and accelerometer
     if (!bHasIMU)
         return;
@@ -1689,95 +1679,122 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
     /* Show gyro drift capture progress: */
     if (bHasGyroscope)
     {
-        float flNoiseFraction = SDL_clamp(SDL_sqrtf(ctx->accelerometer_noise_sq) / ACCELEROMETER_NOISE_THRESHOLD, 0.0f, 1.0f);
-        // First, we should draw a "noise meter" based on the ctx->accelerometer_noise value
-        // This can be a progress bar style thing, but with a rectangle growing from the center. When the noise is high, the inside bar grows to fully fill the outline rectangle
-        {
-            log_y += gamepadElements->button_height + 2.0f; // shift down for the next line
+        if (bHasCachedDriftSolution) {
+            // Prompt the user to re-calibrate. Sometimes the calibration system is too lenient on the acceleration values, and the calibration can fire off
+            // This is the visual element for the button but the actual button click result resets the drift solution.
 
-            // Create a holding rectangle and the noise bar rectangle. base these both on button height, and the width of the phrase "Noise:"
-            SDL_strlcpy(text, "Drift Noise Gate:", sizeof(text));
+            // Display the drift solution numbers.
+            // Below that we have a "Recalibrate Drift" button.            
+            SDL_strlcpy(text, "Drift Correction:", sizeof(text));
             SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
-            float noise_bar_width = 100.0f;
-            float noise_bar_height = gamepadElements->button_height; // half the button height
-            SDL_FRect noise_bar_rect = {
-                .x = text_offset_x + 2.0f,
-                .y = log_y + FONT_CHARACTER_SIZE / 2 - noise_bar_height / 2,
-                .w = noise_bar_width,
-                .h = noise_bar_height
+            // Display scientific units - degrees per second.
+            SDL_snprintf(text, sizeof(text), "(%.2f, %.2f, %.2f)(%s/s)",
+                ctx->gyro_drift_solution[0], DEGREE_UTF8,
+                ctx->gyro_drift_solution[1], DEGREE_UTF8,
+                ctx->gyro_drift_solution[2], DEGREE_UTF8 );
+            SDLTest_DrawString(ctx->renderer, text_offset_x + 2.0f, log_y, text);
+           
+            log_y += gamepadElements->button_height + 2.0f; // shift down for the next line
+            const SDL_FRect recalibrate_button_area = {
+                .x = x + BUTTON_PADDING,
+                .y = log_y + FONT_CHARACTER_SIZE / 2 - gamepadElements->button_height / 2,
+                .w = GetGamepadButtonLabelWidth(GetGyroCalibrateButton(ctx)) + 2 * BUTTON_PADDING,
+                .h = gamepadElements->button_height + BUTTON_PADDING
             };
 
-            // Adjust the noise bar rectangle based on the accelerometer noise value
-     
-            float noise_bar_fill_width = flNoiseFraction * noise_bar_width; // scale the width based on the noise value
+            SetGamepadButtonArea(GetGyroCalibrateButton(ctx), &recalibrate_button_area);
+            RenderGamepadButton(GetGyroCalibrateButton(ctx));
 
-            SDL_FRect noise_bar_fill_rect = {
-                .x = noise_bar_rect.x + (noise_bar_rect.w - noise_bar_fill_width) / 2.0f, // center the fill rectangle
-                .y = noise_bar_rect.y,
-                .w = noise_bar_fill_width,
-                .h = noise_bar_height
-            };
-
-            // Set the color based on the noise value
-            Uint8 red = (Uint8)(flNoiseFraction * 255.0f);
-            Uint8 green = (Uint8)((1.0f - flNoiseFraction) * 255.0f);
-            SDL_SetRenderDrawColor(ctx->renderer, red, green, 0, 255); // red when high noise, green when low noise
-            SDL_RenderFillRect(ctx->renderer, &noise_bar_fill_rect);   // draw the filled rectangle
-
-            SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
-            SDL_RenderRect(ctx->renderer, &noise_bar_rect);            // draw the outline rectangle     
-            SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a);// restore color
+            log_y += recalibrate_button_area.h;
         }
-        /* Drift progress bar */
-        // Demonstrate how far we are through the drift progress, and how it resets when there's "high noise", i.e if flNoiseFraction == 1.0f
+        else
         {
-            log_y += gamepadElements->button_height + 2.0f; // shift down for the next line
-            SDL_strlcpy(text, "Drift Progress:", sizeof(text));
-            SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
-            float drift_bar_width = 100.0f;
-            float drift_bar_height = gamepadElements->button_height; // half the button height
-            SDL_FRect drift_bar_rect = {
-                .x = text_offset_x + 2.0f,
-                .y = log_y + FONT_CHARACTER_SIZE / 2 - drift_bar_height / 2,
-                .w = drift_bar_width,
-                .h = drift_bar_height
-            };
-            // Adjust the drift bar rectangle based on the drift calibration progress fraction
-            bool bTooMuchNoise = (flNoiseFraction == 1.0f);
-            float drift_bar_fill_width = bTooMuchNoise ? 1.0f : ctx->drift_calibration_progress_frac * drift_bar_width;
-            SDL_FRect drift_bar_fill_rect = {
-                .x = drift_bar_rect.x,
-                .y = drift_bar_rect.y,
-                .w = drift_bar_fill_width,
-                .h = drift_bar_height
-            };
-            // Set the color based on the drift calibration progress fraction
-            SDL_SetRenderDrawColor(ctx->renderer, 0, 255, 0, 255); // red when too much noise, green when low noise
+            float flNoiseFraction = SDL_clamp(SDL_sqrtf(ctx->accelerometer_noise_sq) / ACCELEROMETER_NOISE_THRESHOLD, 0.0f, 1.0f);
+            // First, we should draw a "noise meter" based on the ctx->accelerometer_noise value
+            // This can be a progress bar style thing, but with a rectangle growing from the center. When the noise is high, the inside bar grows to fully fill the outline rectangle
+            {
+                // Create a holding rectangle and the noise bar rectangle. base these both on button height, and the width of the phrase "Noise:"
+                SDL_strlcpy(text, "Drift Noise Gate:", sizeof(text));
+                SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
+                float noise_bar_width = 100.0f;
+                float noise_bar_height = gamepadElements->button_height; // half the button height
+                const SDL_FRect noise_bar_rect = {
+                    .x = text_offset_x + 2.0f,
+                    .y = log_y + FONT_CHARACTER_SIZE / 2 - noise_bar_height / 2,
+                    .w = noise_bar_width,
+                    .h = noise_bar_height
+                };
 
-            // Now draw the bars with the filled, then empty rectangles
-            SDL_RenderFillRect(ctx->renderer, &drift_bar_fill_rect); // draw the filled rectangle
-            SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
-            SDL_RenderRect(ctx->renderer, &drift_bar_rect);            // draw the outline rectangle
+                // Adjust the noise bar rectangle based on the accelerometer noise value
+         
+                float noise_bar_fill_width = flNoiseFraction * noise_bar_width; // scale the width based on the noise value
 
-            // If there is too much noise, we are going to draw two diagonal red lines between the progress rect corners.
-            if (bTooMuchNoise) {
-                SDL_SetRenderDrawColor(ctx->renderer, 255, 0, 0, 255); // red lines
-                SDL_RenderLine(ctx->renderer,
-                               drift_bar_rect.x, drift_bar_rect.y,
-                               drift_bar_rect.x + drift_bar_rect.w, drift_bar_rect.y + drift_bar_rect.h);
-                SDL_RenderLine(ctx->renderer,
-                               drift_bar_rect.x + drift_bar_rect.w, drift_bar_rect.y,
-                               drift_bar_rect.x, drift_bar_rect.y + drift_bar_rect.h);
+                const SDL_FRect noise_bar_fill_rect = {
+                    .x = noise_bar_rect.x + (noise_bar_rect.w - noise_bar_fill_width) / 2.0f, // center the fill rectangle
+                    .y = noise_bar_rect.y,
+                    .w = noise_bar_fill_width,
+                    .h = noise_bar_height
+                };
+
+                // Set the color based on the noise value
+                Uint8 red = (Uint8)(flNoiseFraction * 255.0f);
+                Uint8 green = (Uint8)((1.0f - flNoiseFraction) * 255.0f);
+                SDL_SetRenderDrawColor(ctx->renderer, red, green, 0, 255); // red when high noise, green when low noise
+                SDL_RenderFillRect(ctx->renderer, &noise_bar_fill_rect);   // draw the filled rectangle
+
+                SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
+                SDL_RenderRect(ctx->renderer, &noise_bar_rect);            // draw the outline rectangle     
+                SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a);// restore color
             }
+            /* Drift progress bar */
+            // Demonstrate how far we are through the drift progress, and how it resets when there's "high noise", i.e if flNoiseFraction == 1.0f
+            {
+                log_y += gamepadElements->button_height + 2.0f; // shift down for the next line
+                SDL_strlcpy(text, "Drift Progress:", sizeof(text));
+                SDLTest_DrawString(ctx->renderer, text_offset_x - SDL_strlen(text) * FONT_CHARACTER_SIZE, log_y, text);
+                float drift_bar_width = 100.0f;
+                float drift_bar_height = gamepadElements->button_height; // half the button height
+                SDL_FRect drift_bar_rect = {
+                    .x = text_offset_x + 2.0f,
+                    .y = log_y + FONT_CHARACTER_SIZE / 2 - drift_bar_height / 2,
+                    .w = drift_bar_width,
+                    .h = drift_bar_height
+                };
+                // Adjust the drift bar rectangle based on the drift calibration progress fraction
+                bool bTooMuchNoise = (flNoiseFraction == 1.0f);
+                float drift_bar_fill_width = bTooMuchNoise ? 1.0f : ctx->drift_calibration_progress_frac * drift_bar_width;
+                SDL_FRect drift_bar_fill_rect = {
+                    .x = drift_bar_rect.x,
+                    .y = drift_bar_rect.y,
+                    .w = drift_bar_fill_width,
+                    .h = drift_bar_height
+                };
+                // Set the color based on the drift calibration progress fraction
+                SDL_SetRenderDrawColor(ctx->renderer, 0, 255, 0, 255); // red when too much noise, green when low noise
 
+                // Now draw the bars with the filled, then empty rectangles
+                SDL_RenderFillRect(ctx->renderer, &drift_bar_fill_rect); // draw the filled rectangle
+                SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
+                SDL_RenderRect(ctx->renderer, &drift_bar_rect);            // draw the outline rectangle
 
-            SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a);         // restore color
+                // If there is too much noise, we are going to draw two diagonal red lines between the progress rect corners.
+                if (bTooMuchNoise) {
+                    SDL_SetRenderDrawColor(ctx->renderer, 255, 0, 0, 255); // red lines
+                    SDL_RenderLine(ctx->renderer,
+                                   drift_bar_rect.x, drift_bar_rect.y,
+                                   drift_bar_rect.x + drift_bar_rect.w, drift_bar_rect.y + drift_bar_rect.h);
+                    SDL_RenderLine(ctx->renderer,
+                                   drift_bar_rect.x + drift_bar_rect.w, drift_bar_rect.y,
+                                   drift_bar_rect.x, drift_bar_rect.y + drift_bar_rect.h);
+                }
+                SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a);         // restore color
+            }
         }
-
     }
 
-    /* Display rotation since the start
-     * But only show after we first get some drift calibration or we're going to be off.
+    /* 3D Gyro Gizmos
+     * Display rotation since the start
+     * But only show after we have a calibration solution or it's misleading.
      */
     if (bHasCachedDriftSolution) {
         log_y += gamepadElements->button_height + 2.0f;
@@ -1838,6 +1855,18 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
             }
 
             SDL_SetRenderDrawColor(ctx->renderer, r, g, b, a); // restore color
+
+            // Update the reset button so that it matches the witch/position of the gyro_preview_rect, sitting below with a small gap
+            const SDL_FRect reset_button_area = {
+                .x = gyro_preview_rect.x,
+                .y = gyro_preview_rect.y + gyro_preview_rect.h + BUTTON_PADDING * 0.5f,
+                .w = SDL_max(gyro_preview_rect.h, GetGamepadButtonLabelWidth(GetGyroResetButton(ctx)) + 2 * BUTTON_PADDING),
+                .h = gamepadElements->button_height + BUTTON_PADDING
+            };
+            SetGamepadButtonArea(GetGyroResetButton(ctx), &reset_button_area);
+            RenderGamepadButton(GetGyroResetButton(ctx));
+
+            
         }
     }
 
