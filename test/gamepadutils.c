@@ -89,6 +89,7 @@ static Vec3 RotateVectorByQuaternion(const Vec3 *v, const Quaternion *q)
     return out;
 }
 
+#ifdef GYRO_ISOMETRIC_PROJECTION
 static Vec2 ProjectVec3ToRect(const Vec3 *v, const SDL_FRect *rect)
 {
     Vec2 out;
@@ -97,6 +98,36 @@ static Vec2 ProjectVec3ToRect(const Vec3 *v, const SDL_FRect *rect)
     out.y = rect->y + (rect->h / 2.0f) - (v->y * (rect->h / 2.0f)); // Y inverted
     return out;
 }
+#else
+static Vec2 ProjectVec3ToRect(const Vec3 *v, const SDL_FRect *rect)
+{
+    // Perspective parameters
+    const float verticalFOV_deg = 40.0f;
+    const float cameraZ = 4.0f; // Camera is at (0, 0, +3), looking toward origin
+
+    // Aspect ratio correction
+    float aspect = rect->w / rect->h;
+
+    // Convert FOV to scale factor
+    float fovScaleY = SDL_tanf((verticalFOV_deg * SDL_PI_F / 180.0f) * 0.5f);
+    float fovScaleX = fovScaleY * aspect;
+
+    // Shift point relative to camera
+    float relZ = cameraZ - v->z;
+    if (relZ < 0.01f)
+        relZ = 0.01f; // Prevent division by 0 or negative depth
+
+    float ndc_x = (v->x / relZ) / fovScaleX;
+    float ndc_y = (v->y / relZ) / fovScaleY;
+
+    // Convert to screen space
+    Vec2 out;
+    out.x = rect->x + (rect->w / 2.0f) + (ndc_x * rect->w / 2.0f);
+    out.y = rect->y + (rect->h / 2.0f) - (ndc_y * rect->h / 2.0f); // flip Y
+    return out;
+
+}
+#endif
 
 void DrawGyroDebugCube(SDL_Renderer *renderer, const Quaternion *orientation, const SDL_FRect *rect)
 {
@@ -1697,6 +1728,22 @@ void RenderGyroDisplay(GyroDisplay *ctx, GamepadDisplay *gamepadElements, SDL_Ga
             SDL_SetRenderDrawColor(ctx->renderer, 100, 100, 100, 255); // gray box
             DrawGyroDebugCube(ctx->renderer, &ctx->gyro_quaternion, &gyro_preview_rect);
             DrawGyroDebugCircle(ctx->renderer, &ctx->gyro_quaternion, &gyro_preview_rect);
+
+            // Draw X and Y axis lines through the gizmo in order to do lineups
+            /*
+            SDL_SetRenderDrawColor(ctx->renderer, 200, 200, 200, 15); //  semi transparent.
+            SDL_RenderLine(ctx->renderer,
+                               gyro_preview_rect.x + gyro_preview_rect.w * 0.5f,
+                               gyro_preview_rect.y,
+                               gyro_preview_rect.x + gyro_preview_rect.w * 0.5f,
+                               gyro_preview_rect.y + gyro_preview_rect.h);
+
+            SDL_RenderLine(ctx->renderer,
+                           gyro_preview_rect.x,
+                           gyro_preview_rect.y + gyro_preview_rect.h * 0.5f,
+                           gyro_preview_rect.x + gyro_preview_rect.w,
+                           gyro_preview_rect.y + gyro_preview_rect.h * 0.5f);
+            */
         }
     }
 
