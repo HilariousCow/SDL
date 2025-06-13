@@ -59,7 +59,8 @@
 #define SWITCH_ACCEL_SCALE 4096.f
 
 #define SWITCH_GYRO_SCALE_OFFSET  13371.0f
-#define SWITCH_GYRO_SCALE_MULT    936.0f
+//#define SWITCH_GYRO_SCALE_MULT    816.0f // Mine works with this
+#define SWITCH_GYRO_SCALE_MULT    936.0f // sam's both work with this
 #define SWITCH_ACCEL_SCALE_OFFSET 16384.0f
 #define SWITCH_ACCEL_SCALE_MULT   4.0f
 
@@ -310,8 +311,8 @@ typedef struct
     bool m_bHasSensorData;
     Uint64 m_ulLastInput;
     Uint64 m_ulLastIMUReset;
-    Uint64 m_ulIMUSampleTimestampNS;
-    Uint32 m_unIMUSamples;
+    Uint64 m_ulIMUSampleTimestampNS;// todo: remove
+    Uint32 m_unIMUSamples;// todo: remove
     Uint64 m_ulIMUUpdateIntervalNS;
     Uint64 m_ulTimestampNS;
     bool m_bVerticalMode;
@@ -1610,7 +1611,9 @@ static bool HIDAPI_DriverSwitch_OpenJoystick(SDL_HIDAPI_Device *device, SDL_Joys
     // Set up for input
     ctx->m_bSyncWrite = false;
     ctx->m_ulLastIMUReset = ctx->m_ulLastInput = SDL_GetTicks();
-    ctx->m_ulIMUUpdateIntervalNS = SDL_MS_TO_NS(5); // Start off at 5 ms update rate
+
+    // Observed sensor rate is 225hz for wired, and 200hz for Bluetooth.
+    ctx->m_ulIMUUpdateIntervalNS = device->is_bluetooth ? SDL_NS_PER_SECOND / 200 : SDL_NS_PER_SECOND / 225; 
 
     // Set up for vertical mode
     ctx->m_bVerticalMode = SDL_GetHintBoolean(SDL_HINT_JOYSTICK_HIDAPI_VERTICAL_JOY_CONS, false);
@@ -2565,12 +2568,16 @@ static void HandleFullControllerState(SDL_Joystick *joystick, SDL_DriverSwitch_C
                                    packet->imuState[0].sAccelY != 0 ||
                                    packet->imuState[0].sAccelX != 0);
         if (bHasSensorData) {
-            const Uint32 IMU_UPDATE_RATE_SAMPLE_FREQUENCY = 1000;
+            //const Uint32 IMU_UPDATE_RATE_SAMPLE_FREQUENCY = 1000;
             Uint64 sensor_timestamp[3];
 
             ctx->m_bHasSensorData = true;
 
             // We got three IMU samples, calculate the IMU update rate and timestamps
+            // By counting many samples we average out the rate over time.
+            // However this could fluctuate over bluetooth which results in the rate of the sensor changing over time. This can have bad fill down effects.
+
+            /*
             ctx->m_unIMUSamples += 3;
             if (ctx->m_unIMUSamples >= IMU_UPDATE_RATE_SAMPLE_FREQUENCY) {
                 Uint64 now = SDL_GetTicksNS();
@@ -2581,7 +2588,7 @@ static void HandleFullControllerState(SDL_Joystick *joystick, SDL_DriverSwitch_C
                 }
                 ctx->m_unIMUSamples = 0;
                 ctx->m_ulIMUSampleTimestampNS = now;
-            }
+            }*/
 
             ctx->m_ulTimestampNS += ctx->m_ulIMUUpdateIntervalNS;
             sensor_timestamp[0] = ctx->m_ulTimestampNS;
