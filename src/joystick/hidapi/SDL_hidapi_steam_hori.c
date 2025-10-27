@@ -51,7 +51,7 @@ typedef struct
 {
     Uint8 last_state[USB_PACKET_LENGTH];
     Uint64 sensor_ns;
-    Uint64 last_tick;
+    Uint16 last_tick;
 
     Uint64 sensor_estimation_start_ns; /* SDL_GetTicksNS() when we started counting */
     Uint32 sensor_packet_count;        /* Packets since sensor_estimation_start_ns */
@@ -345,8 +345,6 @@ static void HIDAPI_DriverSteamHori_HandleStatePacket(SDL_Joystick *joystick, SDL
             sensor_timestamp = timestamp; // if the values were good we woudl call SDL_US_TO_NS(ctx->sensor_ticks);
         } else {
             
-            ctx->last_tick = ctx->sensor_ns;/* Note: Last tick is only really used in the non estimation branch, so this is redundant */
-
             /* Use the latest estimated sensor time stamp to advance the simulated sensor time stamps*/
             ctx->sensor_ns += ctx->estimated_sensor_delta_ns;
             sensor_timestamp = ctx->sensor_ns;
