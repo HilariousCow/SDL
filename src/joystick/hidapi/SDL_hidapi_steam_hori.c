@@ -46,11 +46,17 @@ enum
     SDL_GAMEPAD_NUM_HORI_BUTTONS
 };
 
+#define IMU_MIN_PACKET_COUNT_FOR_SENSOR_ESTIMATION 256
 typedef struct
 {
     Uint8 last_state[USB_PACKET_LENGTH];
-    Uint64 sensor_ticks;
-    Uint32 last_tick;
+    Uint64 sensor_ns;
+    Uint16 last_tick;
+
+    Uint64 sensor_estimation_start_ns; /* SDL_GetTicksNS() when we started counting */
+    Uint32 sensor_packet_count;        /* Packets since sensor_estimation_start_ns */
+    Uint64 estimated_sensor_delta_ns;  /* Estimated per-packet period in ns */
+
     bool wireless;
     bool serial_needs_init;
 } SDL_DriverSteamHori_Context;
@@ -88,6 +94,12 @@ static bool HIDAPI_DriverSteamHori_InitDevice(SDL_HIDAPI_Device *device)
 
     device->context = ctx;
     ctx->serial_needs_init = true;
+
+    ctx->sensor_ns = SDL_GetTicksNS(); 
+    ctx->last_tick = 0;
+    ctx->sensor_estimation_start_ns = SDL_GetTicksNS();
+    ctx->sensor_packet_count = 0;
+    ctx->estimated_sensor_delta_ns = 0;
 
     HIDAPI_SetDeviceName(device, "Wireless HORIPAD For Steam");
 
@@ -298,21 +310,50 @@ static void HIDAPI_DriverSteamHori_HandleStatePacket(SDL_Joystick *joystick, SDL
         Uint64 sensor_timestamp;
         float imu_data[3];
 
-        /* 16-bit timestamp */
-        Uint32 delta;
-        Uint16 tick = LOAD16(data[10],
-                             data[11]);
-        if (ctx->last_tick < tick) {
-            delta = (tick - ctx->last_tick);
-        } else {
-            delta = (SDL_MAX_UINT16 - ctx->last_tick + tick + 1);
+        /* Simulate time stamp delta based on number of received packets over time */
+        ctx->sensor_packet_count++;
+
+        if (ctx->sensor_packet_count >= IMU_MIN_PACKET_COUNT_FOR_SENSOR_ESTIMATION) {
+
+            Uint64 time_since_started_estimation = timestamp - ctx->sensor_estimation_start_ns;
+
+            ctx->estimated_sensor_delta_ns = time_since_started_estimation / IMU_MIN_PACKET_COUNT_FOR_SENSOR_ESTIMATION;
+
+            /* Reset our estimation */
+            ctx->sensor_packet_count = 0;
+            ctx->sensor_estimation_start_ns = timestamp;
         }
 
-        ctx->last_tick = tick;
-        ctx->sensor_ticks += delta;
+        if (ctx->estimated_sensor_delta_ns == 0) {
 
-        /* Sensor timestamp is in 1us units, but there seems to be some issues with the values reported from the device */
-        sensor_timestamp = timestamp; // if the values were good we would call SDL_US_TO_NS(ctx->sensor_ticks);
+            /* Estimated rate has not been established yet, so use previous approach */
+
+            /* 16-bit timestamp */
+            Uint32 delta;
+            Uint16 tick = LOAD16(data[10],
+                                 data[11]);
+            if (ctx->last_tick < tick) {
+                delta = (tick - ctx->last_tick);
+            } else {
+                delta = (SDL_MAX_UINT16 - ctx->last_tick + tick + 1);
+            }
+
+            ctx->last_tick = tick;
+            ctx->sensor_ns += delta;
+
+            /* Sensor timestamp is in 1us units, but there seems to be some issues with the values reported from the device */
+            sensor_timestamp = timestamp; // if the values were good we woudl call SDL_US_TO_NS(ctx->sensor_ticks);
+        } else {
+            
+            ctx->last_tick = ctx->sensor_ns;/* Note: Last tick is only really used in the non estimation branch, so this is redundant */
+
+            /* Use the latest estimated sensor time stamp to advance the simulated sensor time stamps*/
+            ctx->sensor_ns += ctx->estimated_sensor_delta_ns;
+            sensor_timestamp = ctx->sensor_ns;
+        }
+
+
+        /* Use imu rate estimation for bluetooth */
 
         const float accelScale = SDL_STANDARD_GRAVITY * 8 / 32768.0f;
         const float gyroScale = DEG2RAD(2048);
@@ -324,7 +365,7 @@ static void HIDAPI_DriverSteamHori_HandleStatePacket(SDL_Joystick *joystick, SDL
 
         SDL_SendJoystickSensor(timestamp, joystick, SDL_SENSOR_GYRO, sensor_timestamp, imu_data, 3);
 
-      //  SDL_Log("%u %f, %f, %f ", data[0], imu_data[0], imu_data[1], imu_data[2] );
+        //SDL_Log("%u %f, %f, %f ", data[0], imu_data[0], imu_data[1], imu_data[2] );
         imu_data[2] = LOAD16(data[18], data[19]) * accelScale;
         imu_data[1] = -1 * LOAD16(data[20], data[21]) * accelScale;
         imu_data[0] = LOAD16(data[22], data[23]) * accelScale;
