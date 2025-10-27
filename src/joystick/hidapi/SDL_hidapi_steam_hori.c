@@ -51,7 +51,7 @@ typedef struct
 {
     Uint8 last_state[USB_PACKET_LENGTH];
     Uint64 sensor_ns;
-    Uint16 last_tick;
+    Uint64 last_tick;
 
     Uint64 sensor_estimation_start_ns; /* SDL_GetTicksNS() when we started counting */
     Uint32 sensor_packet_count;        /* Packets since sensor_estimation_start_ns */
